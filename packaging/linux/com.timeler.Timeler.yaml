@@ -1,0 +1,35 @@
+app-id: com.timeler.Timeler
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: timeler
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --device=dri
+  - --socket=pulseaudio
+
+modules:
+  - name: timeler
+    buildsystem: simple
+    build-commands:
+      # Binary and Flutter data bundle
+      - install -D -m 0755 timeler /app/bin/timeler
+      - cp -r data/ /app/bin/
+      - cp -r lib/ /app/bin/
+      # Desktop entry and metadata
+      - install -D -m 0644 com.timeler.Timeler.desktop /app/share/applications/com.timeler.Timeler.desktop
+      - install -D -m 0644 com.timeler.Timeler.metainfo.xml /app/share/metainfo/com.timeler.Timeler.metainfo.xml
+      # Scalable Vector Icon for GNOME
+      - install -D -m 0644 com.timeler.Timeler.svg /app/share/icons/hicolor/scalable/apps/com.timeler.Timeler.svg
+    sources:
+      - type: dir
+        path: ../../build/linux/x64/release/bundle
+      - type: file
+        path: com.timeler.Timeler.desktop
+      - type: file
+        path: com.timeler.Timeler.metainfo.xml
+      - type: file
+        path: com.timeler.Timeler.svg
