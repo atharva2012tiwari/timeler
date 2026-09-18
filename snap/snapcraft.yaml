@@ -1,5 +1,5 @@
 name: timeler
-base: core22
+base: core24
 version: '1.0.0'
 summary: Atmospheric focus & Pomodoro timer
 description: |
