@@ -61,6 +61,8 @@ flutter:
     - assets/images/clear.jpg
     - assets/images/night.jpg
     - assets/images/dawn.jpg
+    - assets/images/deep_ocean.jpg
+    - assets/images/surface.jpg
 
   fonts:
     - family: SF Pro

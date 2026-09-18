@@ -5,7 +5,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-enum AtmosphereType { stormToSky, nightToDawn }
+enum AtmosphereType { stormToSky, nightToDawn, deepOceanToSurface }
 
 void main() => runApp(const Timeler());
 
@@ -84,13 +84,23 @@ class TaskItem {
 
 class AtmosphereTheme {
   static ThemeData lerp(double clear, AtmosphereType type) {
-    final primary = type == AtmosphereType.nightToDawn
-        ? Color.lerp(const Color(0xffa8b8e0), const Color(0xfff2a65a), clear)!
-        : Color.lerp(const Color(0xff8ba4bd), const Color(0xfff0c060), clear)!;
+    final primary = switch (type) {
+      AtmosphereType.nightToDawn =>
+        Color.lerp(const Color(0xffa8b8e0), const Color(0xfff2a65a), clear)!,
+      AtmosphereType.deepOceanToSurface =>
+        Color.lerp(const Color(0xff4a9ec4), const Color(0xff40e0d0), clear)!,
+      _ =>
+        Color.lerp(const Color(0xff8ba4bd), const Color(0xfff0c060), clear)!,
+    };
 
-    final surface = type == AtmosphereType.nightToDawn
-        ? Color.lerp(const Color(0xd9050b1a), const Color(0xd91f132e), clear)!
-        : Color.lerp(const Color(0xd90a1520), const Color(0xd9143050), clear)!;
+    final surface = switch (type) {
+      AtmosphereType.nightToDawn =>
+        Color.lerp(const Color(0xd9050b1a), const Color(0xd91f132e), clear)!,
+      AtmosphereType.deepOceanToSurface =>
+        Color.lerp(const Color(0xd9021020), const Color(0xd9083848), clear)!,
+      _ =>
+        Color.lerp(const Color(0xd90a1520), const Color(0xd9143050), clear)!,
+    };
 
     final border = Color.lerp(
       const Color(0x33ffffff),
@@ -545,10 +555,10 @@ class _WeatherTimerState extends State<WeatherTimer>
                           return Column(
                             children: [
                               // Quote
-                              const _QuoteBanner(),
+                              _QuoteBanner(atmosphere: currentAtmosphere),
                               const SizedBox(height: 8),
                               // Header
-                              _Header(clear: clear),
+                              _Header(clear: clear, atmosphere: currentAtmosphere),
                               const SizedBox(height: 12),
                               // Main content
                               Expanded(
@@ -675,6 +685,7 @@ class _WeatherTimerState extends State<WeatherTimer>
                 sessionName: _sessionNameController.text,
                 isPomodoro: mode == TimerMode.pomodoro,
                 onDismiss: dismissCompletion,
+                atmosphere: currentAtmosphere,
               ),
             ),
           ),
@@ -689,18 +700,30 @@ class _WeatherTimerState extends State<WeatherTimer>
 // ---------------------------------------------------------------------------
 
 class _QuoteBanner extends StatelessWidget {
-  const _QuoteBanner();
+  const _QuoteBanner({required this.atmosphere});
+  final AtmosphereType atmosphere;
 
   @override
   Widget build(BuildContext context) {
+    final quote = switch (atmosphere) {
+      AtmosphereType.deepOceanToSurface =>
+        '\u201CFrom the deepest dark, rise toward the light\u201D',
+      AtmosphereType.nightToDawn =>
+        '\u201CThe darkest hour is just before the dawn\u201D',
+      _ => '\u201CTransform your inner storm into a clear day\u201D',
+    };
     return Center(
-      child: Text(
-        '\u201CTransform your inner storm into a clear day\u201D',
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.4),
-          fontSize: 12,
-          fontWeight: FontWeight.w400,
-          letterSpacing: 1.2,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 600),
+        child: Text(
+          quote,
+          key: ValueKey(atmosphere),
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.4),
+            fontSize: 12,
+            fontWeight: FontWeight.w400,
+            letterSpacing: 1.2,
+          ),
         ),
       ),
     );
@@ -712,8 +735,9 @@ class _QuoteBanner extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Header extends StatelessWidget {
-  const _Header({required this.clear});
+  const _Header({required this.clear, required this.atmosphere});
   final double clear;
+  final AtmosphereType atmosphere;
 
   @override
   Widget build(BuildContext context) {
@@ -722,9 +746,32 @@ class _Header extends StatelessWidget {
       Colors.white,
       clear,
     );
+
+    final headerIcon = atmosphere == AtmosphereType.deepOceanToSurface
+        ? Icons.water_outlined
+        : Icons.cloud_outlined;
+
+    final (label, key) = switch (atmosphere) {
+      AtmosphereType.deepOceanToSurface => clear > .72
+          ? ('SUNLIT SHALLOWS', 'surface')
+          : clear > .35
+              ? ('ASCENDING', 'mid')
+              : ('DEEP ABYSS', 'deep'),
+      AtmosphereType.nightToDawn => clear > .72
+          ? ('GOLDEN DAWN', 'dawn')
+          : clear > .35
+              ? ('FIRST LIGHT', 'mid')
+              : ('MIDNIGHT', 'night'),
+      _ => clear > .72
+          ? ('CLEARING SKY', 'clear')
+          : clear > .35
+              ? ('BREAKING THROUGH', 'mid')
+              : ('STORM FRONT', 'storm'),
+    };
+
     return Row(
       children: [
-        Icon(Icons.cloud_outlined, size: 18, color: color),
+        Icon(headerIcon, size: 18, color: color),
         const SizedBox(width: 10),
         Text(
           'TIMELER',
@@ -739,18 +786,8 @@ class _Header extends StatelessWidget {
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 600),
           child: Text(
-            clear > .72
-                ? 'CLEARING SKY'
-                : clear > .35
-                ? 'BREAKING THROUGH'
-                : 'STORM FRONT',
-            key: ValueKey(
-              clear > .72
-                  ? 'clear'
-                  : clear > .35
-                  ? 'mid'
-                  : 'storm',
-            ),
+            label,
+            key: ValueKey(key),
             style: TextStyle(
               fontSize: 10,
               letterSpacing: 4,
@@ -784,12 +821,16 @@ class _ImmersiveBackdrop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scale = 1.0 + breathe * 0.03;
-    final bgImage1 = atmosphere == AtmosphereType.nightToDawn
-        ? 'assets/images/night.jpg'
-        : 'assets/images/storm.jpg';
-    final bgImage2 = atmosphere == AtmosphereType.nightToDawn
-        ? 'assets/images/dawn.jpg'
-        : 'assets/images/clear.jpg';
+    final bgImage1 = switch (atmosphere) {
+      AtmosphereType.nightToDawn => 'assets/images/night.jpg',
+      AtmosphereType.deepOceanToSurface => 'assets/images/deep_ocean.jpg',
+      _ => 'assets/images/storm.jpg',
+    };
+    final bgImage2 = switch (atmosphere) {
+      AtmosphereType.nightToDawn => 'assets/images/dawn.jpg',
+      AtmosphereType.deepOceanToSurface => 'assets/images/surface.jpg',
+      _ => 'assets/images/clear.jpg',
+    };
 
     return Stack(
       fit: StackFit.expand,
@@ -806,7 +847,7 @@ class _ImmersiveBackdrop extends StatelessWidget {
                       alignment: Alignment.center,
                       children: <Widget>[
                         ...previousChildren,
-                        if (currentChild != null) currentChild,
+                        ?currentChild,
                       ],
                     );
                   },
@@ -839,7 +880,7 @@ class _ImmersiveBackdrop extends StatelessWidget {
                         alignment: Alignment.center,
                         children: <Widget>[
                           ...previousChildren,
-                          if (currentChild != null) currentChild,
+                          ?currentChild,
                         ],
                       );
                     },
@@ -857,6 +898,54 @@ class _ImmersiveBackdrop extends StatelessWidget {
             ),
           ),
         ),
+        // Ocean-specific: animated tinted overlay that shifts with depth
+        if (atmosphere == AtmosphereType.deepOceanToSurface) ...[
+          Positioned.fill(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 1200),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color.lerp(
+                      const Color(0x60001830),
+                      const Color(0x1000c8ff),
+                      clear,
+                    )!,
+                    Color.lerp(
+                      const Color(0x80000818),
+                      const Color(0x2000e8ff),
+                      clear,
+                    )!,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Caustic light rays from above
+          Positioned.fill(
+            child: Opacity(
+              opacity: (0.08 + clear * 0.18 + breathe * 0.04).clamp(0.0, 1.0),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment(0.0, -0.9 + breathe * 0.15),
+                    radius: 0.8 + clear * 0.6,
+                    colors: [
+                      Color.lerp(
+                        const Color(0x2040c8ff),
+                        const Color(0x50fffde0),
+                        clear,
+                      )!,
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
         Positioned.fill(
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -865,7 +954,11 @@ class _ImmersiveBackdrop extends StatelessWidget {
                 radius: 1.2,
                 colors: [
                   Colors.transparent,
-                  Colors.black.withValues(alpha: 0.4),
+                  Colors.black.withValues(
+                    alpha: atmosphere == AtmosphereType.deepOceanToSurface
+                        ? 0.5 - clear * 0.15
+                        : 0.4,
+                  ),
                 ],
               ),
             ),
@@ -880,17 +973,175 @@ class _ImmersiveBackdrop extends StatelessWidget {
                 colors: [
                   Colors.transparent,
                   Colors.transparent,
-                  Colors.black.withValues(alpha: 0.45),
+                  Colors.black.withValues(
+                    alpha: atmosphere == AtmosphereType.deepOceanToSurface
+                        ? 0.55 - clear * 0.15
+                        : 0.45,
+                  ),
                 ],
                 stops: const [0.0, 0.5, 1.0],
               ),
             ),
           ),
         ),
+        // Ocean-specific: animated bubble particles
+        if (atmosphere == AtmosphereType.deepOceanToSurface)
+          Positioned.fill(
+            child: _OceanBubbles(clear: clear, breathe: breathe),
+          ),
         child,
       ],
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Ocean Bubbles — animated rising bubble particles
+// ---------------------------------------------------------------------------
+
+class _Bubble {
+  double x;
+  double y;
+  double radius;
+  double speed;
+  double wobbleOffset;
+  double opacity;
+
+  _Bubble({
+    required this.x,
+    required this.y,
+    required this.radius,
+    required this.speed,
+    required this.wobbleOffset,
+    required this.opacity,
+  });
+}
+
+class _OceanBubbles extends StatefulWidget {
+  const _OceanBubbles({required this.clear, required this.breathe});
+  final double clear;
+  final double breathe;
+
+  @override
+  State<_OceanBubbles> createState() => _OceanBubblesState();
+}
+
+class _OceanBubblesState extends State<_OceanBubbles>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final List<_Bubble> _bubbles;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 30),
+    )..repeat();
+
+    // Generate a set of bubbles with varied properties
+    _bubbles = List.generate(28, (i) {
+      final hash = (i * 7919 + 13) % 1000;
+      return _Bubble(
+        x: (hash % 100) / 100.0,
+        y: ((hash * 3 + 17) % 100) / 100.0,
+        radius: 1.5 + (hash % 40) / 10.0,
+        speed: 0.015 + (hash % 30) / 1000.0,
+        wobbleOffset: (hash % 628) / 100.0,
+        opacity: 0.15 + (hash % 50) / 100.0,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) {
+        return CustomPaint(
+          painter: _BubblePainter(
+            bubbles: _bubbles,
+            time: _controller.value,
+            clear: widget.clear,
+            breathe: widget.breathe,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BubblePainter extends CustomPainter {
+  _BubblePainter({
+    required this.bubbles,
+    required this.time,
+    required this.clear,
+    required this.breathe,
+  });
+
+  final List<_Bubble> bubbles;
+  final double time;
+  final double clear;
+  final double breathe;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final b in bubbles) {
+      // Bubbles rise upward continuously
+      final progress = (b.y - time * b.speed * 30) % 1.2 - 0.1;
+      if (progress < -0.05 || progress > 1.05) continue;
+
+      // Wobble side to side with a sinusoidal motion
+      final wobble = 0.02 *
+          (progress * 10 + b.wobbleOffset + time * 12)
+              .remainder(6.28)
+              .abs();
+      final sinWobble =
+          wobble > 3.14 ? -(wobble - 3.14) / 3.14 : wobble / 3.14;
+      final xPos = (b.x + sinWobble * 0.03) * size.width;
+      final yPos = progress * size.height;
+
+      // Bubbles get slightly larger and brighter as they rise near the surface
+      final surfaceBoost = (1 - progress).clamp(0.0, 1.0);
+      final radius =
+          b.radius * (1.0 + surfaceBoost * 0.4 + breathe * 0.15);
+      final alpha =
+          (b.opacity * (0.5 + clear * 0.5) * (0.6 + surfaceBoost * 0.4))
+              .clamp(0.0, 0.7);
+
+      // Color shifts from deep blue glow to white-cyan near surface
+      final color = Color.lerp(
+        Color.fromRGBO(100, 200, 255, alpha),
+        Color.fromRGBO(220, 255, 255, alpha),
+        clear * surfaceBoost,
+      )!;
+
+      final paint = Paint()
+        ..color = color
+        ..style = PaintingStyle.fill;
+
+      canvas.drawCircle(Offset(xPos, yPos), radius, paint);
+
+      // Highlight shimmer on each bubble
+      final highlightPaint = Paint()
+        ..color = Colors.white.withValues(alpha: alpha * 0.4)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(
+        Offset(xPos - radius * 0.3, yPos - radius * 0.3),
+        radius * 0.3,
+        highlightPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BubblePainter oldDelegate) => true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1295,8 +1546,20 @@ class _SettingsPanel extends StatelessWidget {
                   const SizedBox(height: 18),
                   Text(
                     mode == TimerMode.timer
-                        ? 'The storm fades gradually.\nYour focus becomes daylight.'
-                        : 'Work in rounds, rest between.\nThe sky clears with each cycle.',
+                        ? switch (currentAtmosphere) {
+                            AtmosphereType.deepOceanToSurface =>
+                              'Rise from the depths.\nYour focus becomes sunlight.',
+                            AtmosphereType.nightToDawn =>
+                              'The night lifts gently.\nYour focus becomes the dawn.',
+                            _ =>
+                              'The storm fades gradually.\nYour focus becomes daylight.',
+                          }
+                        : switch (currentAtmosphere) {
+                            AtmosphereType.deepOceanToSurface =>
+                              'Work in rounds, rest between.\nYou surface with each cycle.',
+                            _ =>
+                              'Work in rounds, rest between.\nThe sky clears with each cycle.',
+                          },
                     style: TextStyle(
                       fontSize: 12,
                       height: 1.7,
@@ -1436,14 +1699,29 @@ class _CompletionOverlay extends StatelessWidget {
     required this.sessionName,
     required this.isPomodoro,
     required this.onDismiss,
+    required this.atmosphere,
   });
 
   final String sessionName;
   final bool isPomodoro;
   final VoidCallback onDismiss;
+  final AtmosphereType atmosphere;
 
   @override
   Widget build(BuildContext context) {
+    final isOcean = atmosphere == AtmosphereType.deepOceanToSurface;
+    final accentColor = isOcean ? const Color(0xff40e0d0) : const Color(0xfff0c060);
+    final accentLight = isOcean ? const Color(0xffb0fff8) : const Color(0xfffff4be);
+    final icon = isOcean ? Icons.water_drop_rounded : Icons.wb_sunny_rounded;
+
+    final completionText = isOcean
+        ? (isPomodoro
+            ? 'All rounds complete. You\u2019ve reached the surface.'
+            : 'You\u2019ve surfaced. Breathe the light.')
+        : (isPomodoro
+            ? 'All rounds cleared. The sky is yours.'
+            : 'The storm has passed. Well done.');
+
     return Container(
       color: Colors.black.withValues(alpha: 0.5),
       child: Center(
@@ -1454,7 +1732,7 @@ class _CompletionOverlay extends StatelessWidget {
               borderRadius: BorderRadius.circular(36),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xfff0c060).withValues(alpha: 0.15),
+                  color: accentColor.withValues(alpha: 0.15),
                   blurRadius: 80,
                   spreadRadius: 8,
                 ),
@@ -1492,26 +1770,25 @@ class _CompletionOverlay extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Sun icon
+                      // Icon
                       Container(
                         width: 64,
                         height: 64,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          gradient: const RadialGradient(
-                            colors: [Color(0xfffff4be), Color(0xfff0c060)],
+                          gradient: RadialGradient(
+                            colors: [accentLight, accentColor],
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xfff0c060)
-                                  .withValues(alpha: 0.4),
+                              color: accentColor.withValues(alpha: 0.4),
                               blurRadius: 30,
                               spreadRadius: 4,
                             ),
                           ],
                         ),
-                        child: const Icon(
-                          Icons.wb_sunny_rounded,
+                        child: Icon(
+                          icon,
                           color: Colors.white,
                           size: 32,
                         ),
@@ -1544,9 +1821,7 @@ class _CompletionOverlay extends StatelessWidget {
                         ),
 
                       Text(
-                        isPomodoro
-                            ? 'All rounds cleared. The sky is yours.'
-                            : 'The storm has passed. Well done.',
+                        completionText,
                         style: TextStyle(
                           fontSize: 13,
                           color: Colors.white.withValues(alpha: 0.5),
@@ -1559,8 +1834,7 @@ class _CompletionOverlay extends StatelessWidget {
                       FilledButton(
                         onPressed: onDismiss,
                         style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xfff0c060)
-                              .withValues(alpha: 0.8),
+                          backgroundColor: accentColor.withValues(alpha: 0.8),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 36,
@@ -1894,6 +2168,18 @@ class _SettingsDialog extends StatelessWidget {
                     primaryColor: primary,
                     onTap: () =>
                         onAtmosphereChanged(AtmosphereType.nightToDawn),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Option 3: Deep Ocean to Surface
+                  _AtmosphereOptionTile(
+                    title: 'Deep Ocean to Surface',
+                    description: 'Rise from the dark abyss through bioluminescent depths to sun-drenched shallows',
+                    icon: Icons.water_outlined,
+                    isSelected: currentAtmosphere == AtmosphereType.deepOceanToSurface,
+                    primaryColor: primary,
+                    onTap: () =>
+                        onAtmosphereChanged(AtmosphereType.deepOceanToSurface),
                   ),
 
                   const SizedBox(height: 28),
