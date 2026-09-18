@@ -1,9 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 enum AtmosphereType { stormToSky, nightToDawn, deepOceanToSurface }
 
@@ -76,6 +77,209 @@ class TaskItem {
   String title;
   bool isCompleted;
   TaskItem(this.title, {this.isCompleted = false});
+}
+
+// ---------------------------------------------------------------------------
+// Progress & Analytics Service (Experimental)
+// ---------------------------------------------------------------------------
+
+enum ProgressPeriod { today, week, month, allTime }
+
+class FocusSession {
+  final String id;
+  final DateTime timestamp;
+  final int durationMinutes;
+  final String mode; // 'timer' or 'pomodoro'
+  final String? sessionName;
+
+  FocusSession({
+    required this.id,
+    required this.timestamp,
+    required this.durationMinutes,
+    required this.mode,
+    this.sessionName,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'timestamp': timestamp.toIso8601String(),
+    'durationMinutes': durationMinutes,
+    'mode': mode,
+    if (sessionName != null) 'sessionName': sessionName,
+  };
+
+  factory FocusSession.fromJson(Map<String, dynamic> json) {
+    return FocusSession(
+      id: json['id'] as String? ??
+          DateTime.now().millisecondsSinceEpoch.toString(),
+      timestamp:
+          DateTime.tryParse(json['timestamp'] as String? ?? '') ?? DateTime.now(),
+      durationMinutes: (json['durationMinutes'] as num?)?.toInt() ?? 0,
+      mode: json['mode'] as String? ?? 'timer',
+      sessionName: json['sessionName'] as String?,
+    );
+  }
+}
+
+class StatsService {
+  StatsService._();
+  static final StatsService instance = StatsService._();
+
+  final List<FocusSession> _sessions = [];
+  List<FocusSession> get sessions => List.unmodifiable(_sessions);
+  bool _initialized = false;
+
+  @visibleForTesting
+  void setSessionsForTesting(List<FocusSession> testSessions) {
+    _sessions.clear();
+    _sessions.addAll(testSessions);
+    _initialized = true;
+  }
+
+  @visibleForTesting
+  void clearForTesting() {
+    _sessions.clear();
+    _initialized = false;
+  }
+
+  Future<File> _resolveFile() async {
+    String? basePath = Platform.environment['SNAP_USER_DATA'];
+    if (basePath == null || basePath.isEmpty) {
+      final xdg = Platform.environment['XDG_DATA_HOME'];
+      if (xdg != null && xdg.isNotEmpty) {
+        basePath = '$xdg/timeler';
+      } else {
+        final home = Platform.environment['HOME'] ?? '.';
+        basePath = '$home/.local/share/timeler';
+      }
+    }
+    final dir = Directory(basePath);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return File('${dir.path}/stats.json');
+  }
+
+  Future<void> init() async {
+    if (_initialized) return;
+    try {
+      final file = await _resolveFile();
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        if (content.trim().isNotEmpty) {
+          final decoded = jsonDecode(content);
+          if (decoded is List) {
+            _sessions.clear();
+            for (final item in decoded) {
+              if (item is Map<String, dynamic>) {
+                _sessions.add(FocusSession.fromJson(item));
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    _initialized = true;
+  }
+
+  Future<void> recordSession({
+    required int durationMinutes,
+    required String mode,
+    String? sessionName,
+  }) async {
+    final session = FocusSession(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      timestamp: DateTime.now(),
+      durationMinutes: durationMinutes,
+      mode: mode,
+      sessionName: sessionName,
+    );
+    _sessions.insert(0, session);
+    await _save();
+  }
+
+  Future<void> _save() async {
+    try {
+      final file = await _resolveFile();
+      final data = jsonEncode(_sessions.map((s) => s.toJson()).toList());
+      await file.writeAsString(data, flush: true);
+    } catch (_) {}
+  }
+
+  List<FocusSession> getSessionsForPeriod(ProgressPeriod period) {
+    final now = DateTime.now();
+    return switch (period) {
+      ProgressPeriod.today => _sessions.where((s) {
+          return s.timestamp.year == now.year &&
+              s.timestamp.month == now.month &&
+              s.timestamp.day == now.day;
+        }).toList(),
+      ProgressPeriod.week => _sessions.where((s) {
+          final sevenDaysAgo = DateTime(now.year, now.month, now.day)
+              .subtract(const Duration(days: 6));
+          final sessionDate = DateTime(
+              s.timestamp.year, s.timestamp.month, s.timestamp.day);
+          return sessionDate.isAtSameMomentAs(sevenDaysAgo) ||
+              sessionDate.isAfter(sevenDaysAgo);
+        }).toList(),
+      ProgressPeriod.month => _sessions.where((s) {
+          return s.timestamp.year == now.year &&
+              s.timestamp.month == now.month;
+        }).toList(),
+      ProgressPeriod.allTime => List.of(_sessions),
+    };
+  }
+
+  int getTotalMinutes(List<FocusSession> list) {
+    return list.fold(0, (sum, s) => sum + s.durationMinutes);
+  }
+
+  int getActiveDaysCount(List<FocusSession> list) {
+    final days = <String>{};
+    for (final s in list) {
+      days.add('${s.timestamp.year}-${s.timestamp.month}-${s.timestamp.day}');
+    }
+    return days.length;
+  }
+
+  int calculateStreak() {
+    if (_sessions.isEmpty) return 0;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+
+    final Set<String> sessionDates = {};
+    for (final s in _sessions) {
+      sessionDates.add('${s.timestamp.year}-${s.timestamp.month}-${s.timestamp.day}');
+    }
+
+    String toKey(DateTime d) => '${d.year}-${d.month}-${d.day}';
+
+    DateTime checkDate;
+    if (sessionDates.contains(toKey(today))) {
+      checkDate = today;
+    } else if (sessionDates.contains(toKey(yesterday))) {
+      checkDate = yesterday;
+    } else {
+      return 0;
+    }
+
+    int streak = 0;
+    while (sessionDates.contains(toKey(checkDate))) {
+      streak++;
+      checkDate = checkDate.subtract(const Duration(days: 1));
+    }
+    return streak;
+  }
+
+  static String formatDuration(int totalMinutes) {
+    if (totalMinutes <= 0) return '0m';
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+    if (h == 0) return '${m}m';
+    if (m == 0) return '${h}h';
+    return '${h}h ${m}m';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +393,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   AtmosphereType currentAtmosphere = AtmosphereType.stormToSky;
   // --- Common state ---
   int minutes = 30;
+  Duration timerDuration = const Duration(minutes: 30);
   Duration left = const Duration(minutes: 30);
   DateTime? stamp;
   Timer? ticker;
@@ -207,6 +412,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   int currentRound = 1;
   PomodoroPhase pomodoroPhase = PomodoroPhase.work;
   int _pomodoroAccumulatedMs = 0;
+  bool pomodoroWaitingForNextPhase = false;
 
   // --- Tasks ---
   List<TaskItem> tasks = [];
@@ -217,6 +423,12 @@ class _WeatherTimerState extends State<WeatherTimer>
     vsync: this,
     duration: const Duration(seconds: 6),
   )..repeat(reverse: true);
+
+  @override
+  void initState() {
+    super.initState();
+    StatsService.instance.init();
+  }
 
   @override
   void dispose() {
@@ -239,9 +451,9 @@ class _WeatherTimerState extends State<WeatherTimer>
   double get clear {
     if (showCompletion) return 1.0;
     if (mode == TimerMode.timer) {
-      return (1 -
-              left.inMilliseconds / Duration(minutes: minutes).inMilliseconds)
-          .clamp(0.0, 1.0);
+      final totalMs = timerDuration.inMilliseconds;
+      if (totalMs <= 0) return 1.0;
+      return (1 - left.inMilliseconds / totalMs).clamp(0.0, 1.0);
     }
     // Pomodoro — overall progress
     final totalMs =
@@ -255,13 +467,30 @@ class _WeatherTimerState extends State<WeatherTimer>
     return ((_pomodoroAccumulatedMs + phaseElapsed) / totalMs).clamp(0.0, 1.0);
   }
 
-  String get clock =>
-      '${left.inMinutes.toString().padLeft(2, '0')}:${(left.inSeconds % 60).toString().padLeft(2, '0')}';
+  String get clock {
+    final hours = left.inHours;
+    final mins = left.inMinutes % 60;
+    final secs = left.inSeconds % 60;
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+    }
+    return '${left.inMinutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
+  }
 
   String get statusText {
     if (showCompletion) return 'SESSION COMPLETE';
     if (mode == TimerMode.timer) {
       return running ? 'WEATHERING THE MOMENT' : 'READY WHEN YOU ARE';
+    }
+    if (pomodoroWaitingForNextPhase) {
+      return switch (pomodoroPhase) {
+        PomodoroPhase.shortBreak =>
+          'FOCUS ROUND $currentRound COMPLETE · READY FOR BREAK',
+        PomodoroPhase.longBreak =>
+          'ALL $totalRounds FOCUS ROUNDS DONE · READY FOR LONG BREAK',
+        PomodoroPhase.work =>
+          'BREAK OVER · READY FOR ROUND $currentRound/$totalRounds',
+      };
     }
     if (!running &&
         currentRound == 1 &&
@@ -275,6 +504,28 @@ class _WeatherTimerState extends State<WeatherTimer>
       PomodoroPhase.longBreak => 'LONG BREAK',
     };
     return 'ROUND $currentRound/$totalRounds · $phaseLabel';
+  }
+
+  String get mainActionLabel {
+    if (running) return 'Pause';
+    if (mode == TimerMode.pomodoro && pomodoroWaitingForNextPhase) {
+      return switch (pomodoroPhase) {
+        PomodoroPhase.shortBreak => 'Continue to Break',
+        PomodoroPhase.longBreak => 'Continue to Long Break',
+        PomodoroPhase.work => 'Continue to Focus',
+      };
+    }
+    if (mode == TimerMode.pomodoro) {
+      final totalPhaseDuration = Duration(minutes: _currentPhaseMinutes);
+      if (left < totalPhaseDuration && left > Duration.zero) {
+        return 'Resume';
+      }
+    } else {
+      if (left < timerDuration && left > Duration.zero) {
+        return 'Resume';
+      }
+    }
+    return 'Begin focus';
   }
 
   // --- Actions ---
@@ -291,6 +542,15 @@ class _WeatherTimerState extends State<WeatherTimer>
           running = false;
           showCompletion = true;
         });
+        final sName = _sessionNameController.text.trim();
+        final durationMins = timerDuration.inMinutes > 0
+            ? timerDuration.inMinutes
+            : (timerDuration.inSeconds > 0 ? 1 : 0);
+        StatsService.instance.recordSession(
+          durationMinutes: durationMins,
+          mode: 'timer',
+          sessionName: sName.isNotEmpty ? sName : null,
+        );
       } else {
         _advancePomodoro();
       }
@@ -303,25 +563,34 @@ class _WeatherTimerState extends State<WeatherTimer>
     _pomodoroAccumulatedMs += _currentPhaseMinutes * 60000;
 
     if (pomodoroPhase == PomodoroPhase.work) {
+      final sName = _sessionNameController.text.trim();
+      StatsService.instance.recordSession(
+        durationMinutes: workMinutes,
+        mode: 'pomodoro',
+        sessionName: sName.isNotEmpty ? sName : null,
+      );
+      SoundPlayer.playPhaseEnd();
       if (currentRound >= totalRounds) {
-        SoundPlayer.playPhaseEnd();
         setState(() {
           pomodoroPhase = PomodoroPhase.longBreak;
           left = Duration(minutes: longBreakMinutes);
+          running = false;
+          pomodoroWaitingForNextPhase = true;
         });
       } else {
-        SoundPlayer.playPhaseEnd();
         setState(() {
           pomodoroPhase = PomodoroPhase.shortBreak;
           left = Duration(minutes: breakMinutes);
+          running = false;
+          pomodoroWaitingForNextPhase = true;
         });
       }
-      _startTicker();
     } else if (pomodoroPhase == PomodoroPhase.longBreak) {
       SoundPlayer.playCompletion();
       setState(() {
         running = false;
         showCompletion = true;
+        pomodoroWaitingForNextPhase = false;
       });
     } else {
       SoundPlayer.playPhaseEnd();
@@ -329,8 +598,9 @@ class _WeatherTimerState extends State<WeatherTimer>
         currentRound++;
         pomodoroPhase = PomodoroPhase.work;
         left = Duration(minutes: workMinutes);
+        running = false;
+        pomodoroWaitingForNextPhase = true;
       });
-      _startTicker();
     }
   }
 
@@ -349,18 +619,17 @@ class _WeatherTimerState extends State<WeatherTimer>
       setState(() => running = false);
       return;
     }
+    if (pomodoroWaitingForNextPhase) {
+      pomodoroWaitingForNextPhase = false;
+    }
     if (left == Duration.zero) {
       if (mode == TimerMode.timer) {
-        left = Duration(minutes: minutes);
+        left = timerDuration;
       } else {
         left = Duration(minutes: _currentPhaseMinutes);
       }
     }
-    stamp = DateTime.now();
-    ticker = Timer.periodic(
-      const Duration(milliseconds: 180),
-      (_) => advance(),
-    );
+    _startTicker();
     setState(() => running = true);
   }
 
@@ -370,8 +639,9 @@ class _WeatherTimerState extends State<WeatherTimer>
     setState(() {
       running = false;
       showCompletion = false;
+      pomodoroWaitingForNextPhase = false;
       if (mode == TimerMode.timer) {
-        left = Duration(minutes: minutes);
+        left = timerDuration;
       } else {
         currentRound = 1;
         pomodoroPhase = PomodoroPhase.work;
@@ -385,8 +655,22 @@ class _WeatherTimerState extends State<WeatherTimer>
     ticker?.cancel();
     setState(() {
       minutes = value;
-      left = Duration(minutes: value);
+      timerDuration = Duration(minutes: value);
+      left = timerDuration;
       running = false;
+      showCompletion = false;
+    });
+  }
+
+  void selectDuration(Duration duration) {
+    if (duration <= Duration.zero) return;
+    ticker?.cancel();
+    setState(() {
+      minutes = duration.inMinutes;
+      timerDuration = duration;
+      left = duration;
+      running = false;
+      showCompletion = false;
     });
   }
 
@@ -398,13 +682,14 @@ class _WeatherTimerState extends State<WeatherTimer>
       mode = newMode;
       running = false;
       showCompletion = false;
+      pomodoroWaitingForNextPhase = false;
       if (newMode == TimerMode.pomodoro) {
         currentRound = 1;
         pomodoroPhase = PomodoroPhase.work;
         left = Duration(minutes: workMinutes);
         _pomodoroAccumulatedMs = 0;
       } else {
-        left = Duration(minutes: minutes);
+        left = timerDuration;
       }
     });
   }
@@ -416,17 +701,93 @@ class _WeatherTimerState extends State<WeatherTimer>
       if (brk != null) breakMinutes = brk.clamp(1, 30);
       if (longBrk != null) longBreakMinutes = longBrk.clamp(1, 60);
       if (rounds != null) totalRounds = rounds.clamp(1, 12);
-      currentRound = 1;
-      pomodoroPhase = PomodoroPhase.work;
-      left = Duration(minutes: workMinutes);
-      _pomodoroAccumulatedMs = 0;
+      if (pomodoroWaitingForNextPhase) {
+        left = Duration(minutes: _currentPhaseMinutes);
+      } else {
+        currentRound = 1;
+        pomodoroPhase = PomodoroPhase.work;
+        left = Duration(minutes: workMinutes);
+        _pomodoroAccumulatedMs = 0;
+      }
     });
+  }
+
+  void selectPomodoroPhase(PomodoroPhase phase) {
+    if (running) return;
+    setState(() {
+      pomodoroPhase = phase;
+      pomodoroWaitingForNextPhase = false;
+      switch (phase) {
+        case PomodoroPhase.work:
+          left = Duration(minutes: workMinutes);
+          break;
+        case PomodoroPhase.shortBreak:
+          left = Duration(minutes: breakMinutes);
+          break;
+        case PomodoroPhase.longBreak:
+          left = Duration(minutes: longBreakMinutes);
+          break;
+      }
+    });
+  }
+
+  Future<void> customPomodoroPhaseDuration(PomodoroPhase phase) async {
+    if (running) return;
+    final initial = switch (phase) {
+      PomodoroPhase.work => Duration(minutes: workMinutes),
+      PomodoroPhase.shortBreak => Duration(minutes: breakMinutes),
+      PomodoroPhase.longBreak => Duration(minutes: longBreakMinutes),
+    };
+    final title = switch (phase) {
+      PomodoroPhase.work => 'Focus Duration',
+      PomodoroPhase.shortBreak => 'Short Break Duration',
+      PomodoroPhase.longBreak => 'Long Break Duration',
+    };
+    final subtitle = switch (phase) {
+      PomodoroPhase.work => 'Set your focus sprint duration',
+      PomodoroPhase.shortBreak => 'Set your quick recharge duration',
+      PomodoroPhase.longBreak => 'Set your deep restorative break duration',
+    };
+    final color = switch (phase) {
+      PomodoroPhase.work => const Color(0xfff59e0b),
+      PomodoroPhase.shortBreak => const Color(0xff10b981),
+      PomodoroPhase.longBreak => const Color(0xff8b5cf6),
+    };
+
+    final result = await showDialog<Duration>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      builder: (dialogContext) => _CustomDurationDialog(
+        initialDuration: initial,
+        primaryColor: color,
+        title: title,
+        subtitle: subtitle,
+        buttonLabel: 'Set Duration',
+      ),
+    );
+    if (result != null && mounted) {
+      final totalMins = result.inMinutes > 0
+          ? result.inMinutes
+          : (result.inSeconds > 0 ? 1 : 1);
+      switch (phase) {
+        case PomodoroPhase.work:
+          updatePomodoro(work: totalMins);
+          break;
+        case PomodoroPhase.shortBreak:
+          updatePomodoro(brk: totalMins);
+          break;
+        case PomodoroPhase.longBreak:
+          updatePomodoro(longBrk: totalMins);
+          break;
+      }
+    }
   }
 
   void dismissCompletion() {
     SoundPlayer.stop();
     setState(() {
       showCompletion = false;
+      pomodoroWaitingForNextPhase = false;
       if (mode == TimerMode.pomodoro) {
         currentRound = 1;
         pomodoroPhase = PomodoroPhase.work;
@@ -465,6 +826,10 @@ class _WeatherTimerState extends State<WeatherTimer>
                 setState(() => currentAtmosphere = type);
                 setDialogState(() {});
               },
+              onOpenProgress: () {
+                Navigator.of(dialogContext).pop();
+                _showProgressDialog();
+              },
             );
           },
         );
@@ -472,37 +837,30 @@ class _WeatherTimerState extends State<WeatherTimer>
     );
   }
 
-  Future<void> customDuration() async {
-    final controller = TextEditingController(text: minutes.toString());
-    final result = await showDialog<int>(
+  void _showProgressDialog() {
+    showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Custom duration'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(
-            labelText: 'Minutes',
-            suffixText: 'min',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, int.tryParse(controller.text)),
-            child: const Text('Apply'),
-          ),
-        ],
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      builder: (dialogContext) {
+        return _ProgressDialog(
+          primaryColor: Theme.of(context).colorScheme.primary,
+        );
+      },
+    );
+  }
+
+  Future<void> customDuration() async {
+    final result = await showDialog<Duration>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.65),
+      builder: (dialogContext) => _CustomDurationDialog(
+        initialDuration: timerDuration,
+        primaryColor: Theme.of(context).colorScheme.primary,
       ),
     );
-    controller.dispose();
-    if (result != null && result >= 1 && result <= 720) select(result);
+    if (result != null && result > Duration.zero) {
+      selectDuration(result);
+    }
   }
 
   // --- Build ---
@@ -539,11 +897,20 @@ class _WeatherTimerState extends State<WeatherTimer>
                             breathe: _breathe.value,
                             statusText: statusText,
                             sessionNameController: _sessionNameController,
+                            isPomodoro: mode == TimerMode.pomodoro,
+                            pomodoroPhase: pomodoroPhase,
+                            workMinutes: workMinutes,
+                            breakMinutes: breakMinutes,
+                            longBreakMinutes: longBreakMinutes,
+                            onSelectPhase: running ? null : selectPomodoroPhase,
                           );
                           final controls = _Controls(
                             running: running,
                             onToggle: toggle,
                             onReset: reset,
+                            actionLabel: mainActionLabel,
+                            isWaiting: mode == TimerMode.pomodoro &&
+                                pomodoroWaitingForNextPhase,
                           );
                           final taskPanel = _TaskListPanel(
                             tasks: tasks,
@@ -590,6 +957,11 @@ class _WeatherTimerState extends State<WeatherTimer>
                                                   setState(
                                                     () => currentAtmosphere = v,
                                                   ),
+                                              pomodoroPhase: pomodoroPhase,
+                                              currentRound: currentRound,
+                                              onSelectPhase: selectPomodoroPhase,
+                                              onCustomPhaseDuration:
+                                                  customPomodoroPhaseDuration,
                                             ),
                                             const SizedBox(height: 16),
                                             SizedBox(
@@ -630,6 +1002,12 @@ class _WeatherTimerState extends State<WeatherTimer>
                                                             currentAtmosphere =
                                                                 v,
                                                       ),
+                                                  pomodoroPhase: pomodoroPhase,
+                                                  currentRound: currentRound,
+                                                  onSelectPhase:
+                                                      selectPomodoroPhase,
+                                                  onCustomPhaseDuration:
+                                                      customPomodoroPhaseDuration,
                                                 ),
                                                 const SizedBox(height: 16),
                                                 Expanded(child: taskPanel),
@@ -1245,6 +1623,12 @@ class _TimerDial extends StatelessWidget {
     required this.breathe,
     required this.statusText,
     required this.sessionNameController,
+    this.isPomodoro = false,
+    this.pomodoroPhase = PomodoroPhase.work,
+    this.workMinutes = 25,
+    this.breakMinutes = 5,
+    this.longBreakMinutes = 15,
+    this.onSelectPhase,
   });
 
   final String clock;
@@ -1253,6 +1637,12 @@ class _TimerDial extends StatelessWidget {
   final double breathe;
   final String statusText;
   final TextEditingController sessionNameController;
+  final bool isPomodoro;
+  final PomodoroPhase pomodoroPhase;
+  final int workMinutes;
+  final int breakMinutes;
+  final int longBreakMinutes;
+  final ValueChanged<PomodoroPhase>? onSelectPhase;
 
   @override
   Widget build(BuildContext context) {
@@ -1265,7 +1655,7 @@ class _TimerDial extends StatelessWidget {
 
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440, maxHeight: 310),
+        constraints: const BoxConstraints(maxWidth: 440, maxHeight: 330),
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(36),
@@ -1291,7 +1681,7 @@ class _TimerDial extends StatelessWidget {
                 curve: Curves.easeInOut,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 40,
-                  vertical: 28,
+                  vertical: 24,
                 ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(36),
@@ -1312,15 +1702,55 @@ class _TimerDial extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (isPomodoro) ...[
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            _DialPhasePill(
+                              label: 'Focus',
+                              durationMinutes: workMinutes,
+                              isActive: pomodoroPhase == PomodoroPhase.work,
+                              accentColor: const Color(0xfff59e0b),
+                              onTap: onSelectPhase != null
+                                  ? () => onSelectPhase!(PomodoroPhase.work)
+                                  : null,
+                            ),
+                            const SizedBox(width: 8),
+                            _DialPhasePill(
+                              label: 'Break',
+                              durationMinutes: breakMinutes,
+                              isActive: pomodoroPhase == PomodoroPhase.shortBreak,
+                              accentColor: const Color(0xff10b981),
+                              onTap: onSelectPhase != null
+                                  ? () => onSelectPhase!(PomodoroPhase.shortBreak)
+                                  : null,
+                            ),
+                            const SizedBox(width: 8),
+                            _DialPhasePill(
+                              label: 'Long Break',
+                              durationMinutes: longBreakMinutes,
+                              isActive: pomodoroPhase == PomodoroPhase.longBreak,
+                              accentColor: const Color(0xff8b5cf6),
+                              onTap: onSelectPhase != null
+                                  ? () => onSelectPhase!(PomodoroPhase.longBreak)
+                                  : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     // Clock
                     Text(
                       clock,
                       style: TextStyle(
                         fontFamily: 'SF Pro',
                         color: Colors.white,
-                        fontSize: 80,
+                        fontSize: clock.length > 5 ? 56 : 80,
                         fontWeight: FontWeight.w300,
-                        letterSpacing: 8,
+                        letterSpacing: clock.length > 5 ? 3 : 8,
                         height: 1.0,
                         shadows: [
                           Shadow(
@@ -1387,6 +1817,60 @@ class _TimerDial extends StatelessWidget {
   }
 }
 
+class _DialPhasePill extends StatelessWidget {
+  const _DialPhasePill({
+    required this.label,
+    required this.durationMinutes,
+    required this.isActive,
+    required this.accentColor,
+    this.onTap,
+  });
+
+  final String label;
+  final int durationMinutes;
+  final bool isActive;
+  final Color accentColor;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: isActive
+                ? accentColor.withValues(alpha: 0.22)
+                : Colors.white.withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isActive
+                  ? accentColor.withValues(alpha: 0.6)
+                  : Colors.white.withValues(alpha: 0.08),
+              width: 1,
+            ),
+          ),
+          child: Text(
+            '$label ${durationMinutes}m',
+            style: TextStyle(
+              color: isActive
+                  ? accentColor
+                  : Colors.white.withValues(alpha: 0.6),
+              fontSize: 11,
+              fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Settings Panel
 // ---------------------------------------------------------------------------
@@ -1407,6 +1891,10 @@ class _SettingsPanel extends StatelessWidget {
     required this.onPomodoroUpdate,
     required this.currentAtmosphere,
     required this.onAtmosphereChanged,
+    this.pomodoroPhase = PomodoroPhase.work,
+    this.currentRound = 1,
+    this.onSelectPhase,
+    this.onCustomPhaseDuration,
   });
 
   final TimerMode mode;
@@ -1421,11 +1909,15 @@ class _SettingsPanel extends StatelessWidget {
   onPomodoroUpdate;
   final AtmosphereType currentAtmosphere;
   final ValueChanged<AtmosphereType> onAtmosphereChanged;
+  final PomodoroPhase pomodoroPhase;
+  final int currentRound;
+  final ValueChanged<PomodoroPhase>? onSelectPhase;
+  final ValueChanged<PomodoroPhase>? onCustomPhaseDuration;
 
   @override
   Widget build(BuildContext context) {
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 340),
+      constraints: const BoxConstraints(maxWidth: 360),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(32),
@@ -1498,45 +1990,101 @@ class _SettingsPanel extends StatelessWidget {
                             ),
                     ),
                   ] else ...[
-                    const Text(
-                      'Pomodoro settings',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Pomodoro intervals',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              width: 1,
+                            ),
+                          ),
+                          child: Text(
+                            'Round $currentRound of $totalRounds',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white.withValues(alpha: 0.8),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 14),
-                    _StepperRow(
-                      label: 'Focus',
-                      value: workMinutes,
-                      suffix: 'min',
+                    const SizedBox(height: 12),
+
+                    // Option 1: Focus
+                    _PomodoroPhaseOptionCard(
+                      title: 'FOCUS',
+                      minutes: workMinutes,
+                      accentColor: const Color(0xfff59e0b),
+                      icon: Icons.bolt_rounded,
+                      isCurrent: pomodoroPhase == PomodoroPhase.work,
                       enabled: !running,
+                      onTap: () => onSelectPhase?.call(PomodoroPhase.work),
                       onDec: () => onPomodoroUpdate(work: workMinutes - 5),
                       onInc: () => onPomodoroUpdate(work: workMinutes + 5),
+                      onCustomDuration: () =>
+                          onCustomPhaseDuration?.call(PomodoroPhase.work),
                     ),
-                    _StepperRow(
-                      label: 'Break',
-                      value: breakMinutes,
-                      suffix: 'min',
+                    const SizedBox(height: 8),
+
+                    // Option 2: Break
+                    _PomodoroPhaseOptionCard(
+                      title: 'SHORT BREAK',
+                      minutes: breakMinutes,
+                      accentColor: const Color(0xff10b981),
+                      icon: Icons.coffee_rounded,
+                      isCurrent: pomodoroPhase == PomodoroPhase.shortBreak,
                       enabled: !running,
+                      onTap: () =>
+                          onSelectPhase?.call(PomodoroPhase.shortBreak),
                       onDec: () => onPomodoroUpdate(brk: breakMinutes - 1),
                       onInc: () => onPomodoroUpdate(brk: breakMinutes + 1),
+                      onCustomDuration: () =>
+                          onCustomPhaseDuration?.call(PomodoroPhase.shortBreak),
                     ),
-                    _StepperRow(
-                      label: 'Long break',
-                      value: longBreakMinutes,
-                      suffix: 'min',
+                    const SizedBox(height: 8),
+
+                    // Option 3: Long Break
+                    _PomodoroPhaseOptionCard(
+                      title: 'LONG BREAK',
+                      minutes: longBreakMinutes,
+                      accentColor: const Color(0xff8b5cf6),
+                      icon: Icons.spa_rounded,
+                      isCurrent: pomodoroPhase == PomodoroPhase.longBreak,
                       enabled: !running,
+                      onTap: () =>
+                          onSelectPhase?.call(PomodoroPhase.longBreak),
                       onDec: () =>
                           onPomodoroUpdate(longBrk: longBreakMinutes - 5),
                       onInc: () =>
                           onPomodoroUpdate(longBrk: longBreakMinutes + 5),
+                      onCustomDuration: () =>
+                          onCustomPhaseDuration?.call(PomodoroPhase.longBreak),
                     ),
-                    _StepperRow(
-                      label: 'Rounds',
-                      value: totalRounds,
-                      suffix: '',
+                    const SizedBox(height: 10),
+
+                    // Rounds per cycle bar
+                    _PomodoroRoundsBar(
+                      totalRounds: totalRounds,
+                      currentRound: currentRound,
                       enabled: !running,
                       onDec: () => onPomodoroUpdate(rounds: totalRounds - 1),
                       onInc: () => onPomodoroUpdate(rounds: totalRounds + 1),
@@ -1579,62 +2127,194 @@ class _SettingsPanel extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Stepper Row (for Pomodoro settings)
+// Pomodoro Option Card (Clear, Big, Distinct & Premium)
 // ---------------------------------------------------------------------------
 
-class _StepperRow extends StatelessWidget {
-  const _StepperRow({
-    required this.label,
-    required this.value,
-    required this.suffix,
+class _PomodoroPhaseOptionCard extends StatelessWidget {
+  const _PomodoroPhaseOptionCard({
+    required this.title,
+    required this.minutes,
+    required this.accentColor,
+    required this.icon,
+    required this.isCurrent,
     required this.enabled,
+    required this.onTap,
     required this.onDec,
     required this.onInc,
+    required this.onCustomDuration,
   });
 
-  final String label;
-  final int value;
-  final String suffix;
+  final String title;
+  final int minutes;
+  final Color accentColor;
+  final IconData icon;
+  final bool isCurrent;
   final bool enabled;
-  final VoidCallback onDec, onInc;
+  final VoidCallback onTap;
+  final VoidCallback onDec;
+  final VoidCallback onInc;
+  final VoidCallback onCustomDuration;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                color: Colors.white.withValues(alpha: 0.7),
-              ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(18),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: isCurrent
+                  ? [
+                      accentColor.withValues(alpha: 0.22),
+                      accentColor.withValues(alpha: 0.08),
+                    ]
+                  : [
+                      Colors.white.withValues(alpha: 0.06),
+                      Colors.white.withValues(alpha: 0.02),
+                    ],
             ),
-          ),
-          _miniButton(Icons.remove_rounded, enabled ? onDec : null),
-          const SizedBox(width: 6),
-          SizedBox(
-            width: 50,
-            child: Text(
-              suffix.isNotEmpty ? '$value $suffix' : '$value',
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                fontFeatures: [FontFeature.tabularFigures()],
-              ),
+            border: Border.all(
+              color: isCurrent
+                  ? accentColor.withValues(alpha: 0.75)
+                  : Colors.white.withValues(alpha: 0.1),
+              width: isCurrent ? 1.6 : 1.0,
             ),
+            boxShadow: isCurrent
+                ? [
+                    BoxShadow(
+                      color: accentColor.withValues(alpha: 0.25),
+                      blurRadius: 18,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
+                : [],
           ),
-          const SizedBox(width: 6),
-          _miniButton(Icons.add_rounded, enabled ? onInc : null),
-        ],
+          child: Row(
+            children: [
+              // Icon container
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: isCurrent ? 0.28 : 0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: accentColor.withValues(alpha: isCurrent ? 0.6 : 0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Icon(icon, size: 16, color: accentColor),
+              ),
+              const SizedBox(width: 10),
+
+              // Title and duration
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.8,
+                              color: isCurrent
+                                  ? accentColor
+                                  : Colors.white.withValues(alpha: 0.75),
+                            ),
+                          ),
+                        ),
+                        if (isCurrent) ...[
+                          const SizedBox(width: 5),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 5,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: accentColor.withValues(alpha: 0.25),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: accentColor.withValues(alpha: 0.6),
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Text(
+                              'ACTIVE',
+                              style: TextStyle(
+                                color: accentColor,
+                                fontSize: 8,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    InkWell(
+                      onTap: enabled ? onCustomDuration : null,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '$minutes',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                          Text(
+                            ' min',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w400,
+                              color: Colors.white.withValues(alpha: 0.65),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.edit_rounded,
+                            size: 11,
+                            color: Colors.white.withValues(alpha: 0.35),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Stepper buttons
+              _stepBtn(Icons.remove_rounded, enabled ? onDec : null),
+              const SizedBox(width: 5),
+              _stepBtn(Icons.add_rounded, enabled ? onInc : null),
+            ],
+          ),
+        ),
       ),
     );
   }
 
-  Widget _miniButton(IconData icon, VoidCallback? onPressed) {
+  Widget _stepBtn(IconData icon, VoidCallback? onPressed) {
     return SizedBox(
       width: 28,
       height: 28,
@@ -1643,9 +2323,140 @@ class _StepperRow extends StatelessWidget {
         icon: Icon(icon, size: 14),
         padding: EdgeInsets.zero,
         style: IconButton.styleFrom(
-          backgroundColor: Colors.white.withValues(alpha: 0.08),
+          backgroundColor: Colors.white.withValues(alpha: 0.1),
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: Colors.white.withValues(alpha: 0.03),
+          disabledForegroundColor: Colors.white24,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pomodoro Rounds Bar
+// ---------------------------------------------------------------------------
+
+class _PomodoroRoundsBar extends StatelessWidget {
+  const _PomodoroRoundsBar({
+    required this.totalRounds,
+    required this.currentRound,
+    required this.enabled,
+    required this.onDec,
+    required this.onInc,
+  });
+
+  final int totalRounds;
+  final int currentRound;
+  final bool enabled;
+  final VoidCallback onDec;
+  final VoidCallback onInc;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: Colors.white.withValues(alpha: 0.05),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.repeat_rounded,
+              size: 15,
+              color: Colors.white70,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Rounds per cycle',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white70,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                // Indicator dots
+                Row(
+                  children: List.generate(
+                    totalRounds.clamp(1, 8),
+                    (i) => Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.only(right: 4),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: (i + 1) <= currentRound
+                            ? const Color(0xfff0c060)
+                            : Colors.white.withValues(alpha: 0.2),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: IconButton(
+              onPressed: enabled ? onDec : null,
+              icon: const Icon(Icons.remove_rounded, size: 14),
+              padding: EdgeInsets.zero,
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.08),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.white.withValues(alpha: 0.03),
+                disabledForegroundColor: Colors.white24,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$totalRounds',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: IconButton(
+              onPressed: enabled ? onInc : null,
+              icon: const Icon(Icons.add_rounded, size: 14),
+              padding: EdgeInsets.zero,
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.08),
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: Colors.white.withValues(alpha: 0.03),
+                disabledForegroundColor: Colors.white24,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1660,34 +2471,56 @@ class _Controls extends StatelessWidget {
     required this.running,
     required this.onToggle,
     required this.onReset,
+    this.actionLabel,
+    this.isWaiting = false,
   });
 
   final bool running;
   final VoidCallback onToggle, onReset;
+  final String? actionLabel;
+  final bool isWaiting;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      TextButton.icon(
-        onPressed: onReset,
-        icon: const Icon(Icons.replay_rounded, size: 18),
-        label: const Text('Reset'),
-      ),
-      const SizedBox(width: 20),
-      FilledButton.icon(
-        onPressed: onToggle,
-        icon: Icon(
-          running ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          size: 20,
+  Widget build(BuildContext context) {
+    final label = actionLabel ?? (running ? 'Pause' : 'Begin focus');
+    final icon = running
+        ? Icons.pause_rounded
+        : (isWaiting
+            ? Icons.arrow_forward_rounded
+            : Icons.play_arrow_rounded);
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        TextButton.icon(
+          onPressed: onReset,
+          icon: const Icon(Icons.replay_rounded, size: 18),
+          label: const Text('Reset'),
         ),
-        label: Text(
-          running ? 'Pause' : 'Begin focus',
-          style: const TextStyle(fontWeight: FontWeight.w600),
+        const SizedBox(width: 20),
+        FilledButton.icon(
+          onPressed: onToggle,
+          icon: Icon(icon, size: 20),
+          label: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          style: isWaiting
+              ? FilledButton.styleFrom(
+                  backgroundColor: const Color(0xfff0c060),
+                  foregroundColor: Colors.black87,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22,
+                    vertical: 12,
+                  ),
+                  elevation: 6,
+                  shadowColor: const Color(0xfff0c060).withValues(alpha: 0.4),
+                )
+              : null,
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2048,10 +2881,12 @@ class _SettingsDialog extends StatelessWidget {
   const _SettingsDialog({
     required this.currentAtmosphere,
     required this.onAtmosphereChanged,
+    required this.onOpenProgress,
   });
 
   final AtmosphereType currentAtmosphere;
   final ValueChanged<AtmosphereType> onAtmosphereChanged;
+  final VoidCallback onOpenProgress;
 
   @override
   Widget build(BuildContext context) {
@@ -2062,7 +2897,7 @@ class _SettingsDialog extends StatelessWidget {
       backgroundColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440),
+        constraints: const BoxConstraints(maxWidth: 440, maxHeight: 680),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(28),
           child: BackdropFilter(
@@ -2084,126 +2919,161 @@ class _SettingsDialog extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: primary.withValues(alpha: 0.2),
-                          shape: BoxShape.circle,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: primary.withValues(alpha: 0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.settings_rounded,
+                            color: primary,
+                            size: 20,
+                          ),
                         ),
-                        child: Icon(
-                          Icons.settings_rounded,
-                          color: primary,
-                          size: 20,
+                        const SizedBox(width: 14),
+                        const Text(
+                          'Settings',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: -0.5,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 14),
-                      const Text(
-                        'Settings',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                          letterSpacing: -0.5,
+                        const Spacer(),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close_rounded, size: 20),
+                          color: Colors.white54,
+                          hoverColor: Colors.white10,
+                          splashRadius: 20,
+                          tooltip: 'Close',
                         ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close_rounded, size: 20),
-                        color: Colors.white54,
-                        hoverColor: Colors.white10,
-                        splashRadius: 20,
-                        tooltip: 'Close',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
 
-                  // Atmosphere Section Title
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.palette_outlined,
-                        size: 16,
-                        color: Colors.white.withValues(alpha: 0.6),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'ATMOSPHERE',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.5,
+                    // Atmosphere Section Title
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.palette_outlined,
+                          size: 16,
                           color: Colors.white.withValues(alpha: 0.6),
                         ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'ATMOSPHERE',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.5,
+                            color: Colors.white.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Option 1: Storm to Clear Sky
+                    _AtmosphereOptionTile(
+                      title: 'Storm to Clear Sky',
+                      description: 'Rain & storm clouds clear into bright blue sky as your session progresses',
+                      icon: Icons.thunderstorm_outlined,
+                      isSelected: currentAtmosphere == AtmosphereType.stormToSky,
+                      primaryColor: primary,
+                      onTap: () => onAtmosphereChanged(AtmosphereType.stormToSky),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Option 2: Night to Dawn
+                    _AtmosphereOptionTile(
+                      title: 'Night to Dawn',
+                      description: 'Deep starry night slowly transforms into a glowing golden sunrise',
+                      icon: Icons.nightlight_outlined,
+                      isSelected: currentAtmosphere == AtmosphereType.nightToDawn,
+                      primaryColor: primary,
+                      onTap: () =>
+                          onAtmosphereChanged(AtmosphereType.nightToDawn),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Option 3: Deep Ocean to Surface
+                    _AtmosphereOptionTile(
+                      title: 'Deep Ocean to Surface',
+                      description: 'Rise from the dark abyss through bioluminescent depths to sun-drenched shallows',
+                      icon: Icons.water_outlined,
+                      isSelected: currentAtmosphere == AtmosphereType.deepOceanToSurface,
+                      primaryColor: primary,
+                      onTap: () =>
+                          onAtmosphereChanged(AtmosphereType.deepOceanToSurface),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // Statistics & Activity Section Title
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.insights_rounded,
+                          size: 16,
+                          color: Colors.white.withValues(alpha: 0.6),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'STATISTICS & ACTIVITY',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 1.5,
+                            color: Colors.white.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Focus Progress & Analytics Tile
+                    _SettingsActionTile(
+                      title: 'Focus Progress & Analytics',
+                      description: 'View daily, weekly, monthly, and all-time focus statistics',
+                      icon: Icons.insights_rounded,
+                      primaryColor: primary,
+                      onTap: onOpenProgress,
+                    ),
+
+                    const SizedBox(height: 28),
+
+                    // Done Button
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Option 1: Storm to Clear Sky
-                  _AtmosphereOptionTile(
-                    title: 'Storm to Clear Sky',
-                    description: 'Rain & storm clouds clear into bright blue sky as your session progresses',
-                    icon: Icons.thunderstorm_outlined,
-                    isSelected: currentAtmosphere == AtmosphereType.stormToSky,
-                    primaryColor: primary,
-                    onTap: () => onAtmosphereChanged(AtmosphereType.stormToSky),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Option 2: Night to Dawn
-                  _AtmosphereOptionTile(
-                    title: 'Night to Dawn',
-                    description: 'Deep starry night slowly transforms into a glowing golden sunrise',
-                    icon: Icons.nightlight_outlined,
-                    isSelected: currentAtmosphere == AtmosphereType.nightToDawn,
-                    primaryColor: primary,
-                    onTap: () =>
-                        onAtmosphereChanged(AtmosphereType.nightToDawn),
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Option 3: Deep Ocean to Surface
-                  _AtmosphereOptionTile(
-                    title: 'Deep Ocean to Surface',
-                    description: 'Rise from the dark abyss through bioluminescent depths to sun-drenched shallows',
-                    icon: Icons.water_outlined,
-                    isSelected: currentAtmosphere == AtmosphereType.deepOceanToSurface,
-                    primaryColor: primary,
-                    onTap: () =>
-                        onAtmosphereChanged(AtmosphereType.deepOceanToSurface),
-                  ),
-
-                  const SizedBox(height: 28),
-
-                  // Done Button
-                  FilledButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                      child: const Text(
+                        'Done',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                    child: const Text(
-                      'Done',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -2301,6 +3171,1168 @@ class _AtmosphereOptionTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SettingsActionTile extends StatelessWidget {
+  const _SettingsActionTile({
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.primaryColor,
+    required this.onTap,
+  });
+
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color primaryColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: Colors.white.withValues(alpha: 0.04),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.08),
+            width: 1.0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: primaryColor.withValues(alpha: 0.15),
+              ),
+              child: Icon(
+                icon,
+                color: primaryColor,
+                size: 20,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white.withValues(alpha: 0.95),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    description,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.3,
+                      color: Colors.white.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: Colors.white.withValues(alpha: 0.4),
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Progress & Analytics Dialog
+// ---------------------------------------------------------------------------
+
+class _ProgressDialog extends StatefulWidget {
+  const _ProgressDialog({required this.primaryColor});
+
+  final Color primaryColor;
+
+  @override
+  State<_ProgressDialog> createState() => _ProgressDialogState();
+}
+
+class _ProgressDialogState extends State<_ProgressDialog> {
+  ProgressPeriod _selectedPeriod = ProgressPeriod.today;
+
+  @override
+  Widget build(BuildContext context) {
+    final sessions =
+        StatsService.instance.getSessionsForPeriod(_selectedPeriod);
+    final totalMinutes = StatsService.instance.getTotalMinutes(sessions);
+    final streak = StatsService.instance.calculateStreak();
+    final pomodoroCount = sessions.where((s) => s.mode == 'pomodoro').length;
+    final timerCount = sessions.where((s) => s.mode == 'timer').length;
+    final activeDays = StatsService.instance.getActiveDaysCount(sessions);
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 540, maxHeight: 680),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(28),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+            child: Container(
+              padding: const EdgeInsets.all(26),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                color: const Color(0xee0e1824),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 40,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Header
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: widget.primaryColor.withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.insights_rounded,
+                          color: widget.primaryColor,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      const Text(
+                        'Focus Progress',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        color: Colors.white54,
+                        hoverColor: Colors.white10,
+                        splashRadius: 20,
+                        tooltip: 'Close',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Period Selector Bar
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.08),
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        _buildPeriodTab('Today', ProgressPeriod.today),
+                        _buildPeriodTab('7 Days', ProgressPeriod.week),
+                        _buildPeriodTab('This Month', ProgressPeriod.month),
+                        _buildPeriodTab('All Time', ProgressPeriod.allTime),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Scrollable Body
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // 3 Metric Cards Row
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _MetricCard(
+                                  title: 'FOCUS TIME',
+                                  value: StatsService.formatDuration(totalMinutes),
+                                  icon: Icons.timer_outlined,
+                                  primaryColor: widget.primaryColor,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _MetricCard(
+                                  title: 'SESSIONS',
+                                  value: '${sessions.length}',
+                                  icon: Icons.check_circle_outline_rounded,
+                                  primaryColor: widget.primaryColor,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _MetricCard(
+                                  title: _selectedPeriod == ProgressPeriod.week
+                                      ? 'DAILY AVG'
+                                      : (_selectedPeriod == ProgressPeriod.month
+                                          ? 'ACTIVE DAYS'
+                                          : 'STREAK'),
+                                  value: _selectedPeriod == ProgressPeriod.week
+                                      ? StatsService.formatDuration(totalMinutes ~/ 7)
+                                      : (_selectedPeriod == ProgressPeriod.month
+                                          ? '$activeDays days'
+                                          : '$streak ${streak == 1 ? 'day' : 'days'}'),
+                                  icon: Icons.local_fire_department_rounded,
+                                  primaryColor: widget.primaryColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+
+                          // Visual Breakdown Chart
+                          _buildVisualChart(
+                              sessions, totalMinutes, pomodoroCount, timerCount),
+                          const SizedBox(height: 20),
+
+                          // Recent Sessions List Section
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.history_rounded,
+                                size: 15,
+                                color: Colors.white.withValues(alpha: 0.6),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'SESSION HISTORY (${sessions.length})',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  letterSpacing: 1.5,
+                                  color: Colors.white.withValues(alpha: 0.6),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+
+                          if (sessions.isEmpty)
+                            _buildEmptyState()
+                          else
+                            ...sessions.take(15).map(
+                                  (s) => _SessionHistoryItem(
+                                    session: s,
+                                    primaryColor: widget.primaryColor,
+                                  ),
+                                ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPeriodTab(String title, ProgressPeriod period) {
+    final isSelected = _selectedPeriod == period;
+    return Expanded(
+      child: InkWell(
+        onTap: () => setState(() => _selectedPeriod = period),
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: isSelected
+                ? widget.primaryColor.withValues(alpha: 0.25)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? widget.primaryColor.withValues(alpha: 0.6)
+                  : Colors.transparent,
+              width: 1,
+            ),
+          ),
+          child: Text(
+            title,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+              color: isSelected ? Colors.white : Colors.white60,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVisualChart(
+    List<FocusSession> sessions,
+    int totalMinutes,
+    int pomodoroCount,
+    int timerCount,
+  ) {
+    if (_selectedPeriod == ProgressPeriod.week) {
+      return _build7DayChart(sessions);
+    }
+    return _buildModeDistributionBar(pomodoroCount, timerCount, totalMinutes);
+  }
+
+  Widget _build7DayChart(List<FocusSession> sessions) {
+    final now = DateTime.now();
+    final days = List.generate(7, (i) {
+      final d = now.subtract(Duration(days: 6 - i));
+      return DateTime(d.year, d.month, d.day);
+    });
+
+    final dayMinutes = days.map((d) {
+      final matching = sessions.where((s) {
+        return s.timestamp.year == d.year &&
+            s.timestamp.month == d.month &&
+            s.timestamp.day == d.day;
+      });
+      return matching.fold(0, (sum, s) => sum + s.durationMinutes);
+    }).toList();
+
+    int maxM = dayMinutes.reduce(math.max);
+    if (maxM < 60) maxM = 60;
+
+    const weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'LAST 7 DAYS ACTIVITY',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 1.2,
+              color: Colors.white.withValues(alpha: 0.6),
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 110,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(7, (i) {
+                final date = days[i];
+                final isToday = i == 6;
+                final m = dayMinutes[i];
+                final heightFactor = (m / maxM).clamp(0.06, 1.0);
+
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          m > 0 ? '${m}m' : '—',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: isToday ? FontWeight.w700 : FontWeight.w500,
+                            color: isToday
+                                ? widget.primaryColor
+                                : (m > 0 ? Colors.white70 : Colors.white24),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: FractionallySizedBox(
+                              heightFactor: heightFactor,
+                              widthFactor: 0.65,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(6),
+                                  color: isToday
+                                      ? widget.primaryColor
+                                      : (m > 0
+                                          ? widget.primaryColor.withValues(alpha: 0.5)
+                                          : Colors.white.withValues(alpha: 0.08)),
+                                  border: isToday
+                                      ? Border.all(
+                                          color: Colors.white.withValues(alpha: 0.8),
+                                          width: 1,
+                                        )
+                                      : null,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          isToday ? 'Today' : weekdayNames[date.weekday - 1],
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: isToday ? FontWeight.w700 : FontWeight.w500,
+                            color: isToday ? widget.primaryColor : Colors.white60,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModeDistributionBar(
+    int pomodoroCount,
+    int timerCount,
+    int totalMinutes,
+  ) {
+    final totalSessions = pomodoroCount + timerCount;
+    final pomoRatio = totalSessions > 0 ? pomodoroCount / totalSessions : 0.5;
+    final timerRatio = totalSessions > 0 ? timerCount / totalSessions : 0.5;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.03),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'FOCUS DISTRIBUTION',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                  color: Colors.white.withValues(alpha: 0.6),
+                ),
+              ),
+              Text(
+                '$totalSessions total sessions',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.white.withValues(alpha: 0.5),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: SizedBox(
+              height: 10,
+              child: totalSessions == 0
+                  ? Container(color: Colors.white.withValues(alpha: 0.08))
+                  : Row(
+                      children: [
+                        if (pomodoroCount > 0)
+                          Expanded(
+                            flex: (pomoRatio * 100).round(),
+                            child: Container(color: Colors.deepOrangeAccent),
+                          ),
+                        if (timerCount > 0)
+                          Expanded(
+                            flex: (timerRatio * 100).round(),
+                            child: Container(color: widget.primaryColor),
+                          ),
+                      ],
+                    ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildLegendDot(Colors.deepOrangeAccent, 'Pomodoro ($pomodoroCount)'),
+              const SizedBox(width: 16),
+              _buildLegendDot(widget.primaryColor, 'Standard Timer ($timerCount)'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendDot(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: Colors.white.withValues(alpha: 0.7),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.02),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.history_toggle_off_rounded,
+            size: 34,
+            color: Colors.white.withValues(alpha: 0.25),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'No focus sessions recorded for this period',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.65),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Complete a focus session to track your progress here',
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.35),
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.primaryColor,
+  });
+
+  final String title;
+  final String value;
+  final IconData icon;
+  final Color primaryColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 14, color: primaryColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.0,
+                    color: Colors.white.withValues(alpha: 0.6),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              letterSpacing: -0.3,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SessionHistoryItem extends StatelessWidget {
+  const _SessionHistoryItem({
+    required this.session,
+    required this.primaryColor,
+  });
+
+  final FocusSession session;
+  final Color primaryColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final isPomodoro = session.mode == 'pomodoro';
+    final name = (session.sessionName != null && session.sessionName!.isNotEmpty)
+        ? session.sessionName!
+        : (isPomodoro ? 'Pomodoro Focus' : 'Focus Session');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.04),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.06),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isPomodoro
+                  ? Colors.deepOrangeAccent.withValues(alpha: 0.15)
+                  : primaryColor.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isPomodoro ? Icons.alarm_rounded : Icons.timer_outlined,
+              size: 16,
+              color: isPomodoro ? Colors.deepOrangeAccent : primaryColor,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _formatSessionDate(session.timestamp),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.white.withValues(alpha: 0.5),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: primaryColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: primaryColor.withValues(alpha: 0.3),
+                width: 1,
+              ),
+            ),
+            child: Text(
+              '${session.durationMinutes}m',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: primaryColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatSessionDate(DateTime dt) {
+    final now = DateTime.now();
+    final isToday =
+        dt.year == now.year && dt.month == now.month && dt.day == now.day;
+    final timeStr = _formatTime(dt);
+    if (isToday) return 'Today at $timeStr';
+    final yesterday = now.subtract(const Duration(days: 1));
+    final isYesterday = dt.year == yesterday.year &&
+        dt.month == yesterday.month &&
+        dt.day == yesterday.day;
+    if (isYesterday) return 'Yesterday at $timeStr';
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${months[dt.month - 1]} ${dt.day} at $timeStr';
+  }
+
+  String _formatTime(DateTime dt) {
+    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final minute = dt.minute.toString().padLeft(2, '0');
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Custom Duration Dialog (Inspired by wheel timer UI, desktop optimized)
+// ---------------------------------------------------------------------------
+
+class _CustomDurationDialog extends StatefulWidget {
+  const _CustomDurationDialog({
+    required this.initialDuration,
+    required this.primaryColor,
+    this.title = 'Custom Timer',
+    this.subtitle = 'How long do you want to focus for?',
+    this.buttonLabel = 'Set Timer',
+  });
+
+  final Duration initialDuration;
+  final Color primaryColor;
+  final String title;
+  final String subtitle;
+  final String buttonLabel;
+
+  @override
+  State<_CustomDurationDialog> createState() => _CustomDurationDialogState();
+}
+
+class _CustomDurationDialogState extends State<_CustomDurationDialog> {
+  late int _hours;
+  late int _minutes;
+  late int _seconds;
+
+  late final FixedExtentScrollController _hoursController;
+  late final FixedExtentScrollController _minutesController;
+  late final FixedExtentScrollController _secondsController;
+
+  @override
+  void initState() {
+    super.initState();
+    _hours = widget.initialDuration.inHours.clamp(0, 23);
+    _minutes = (widget.initialDuration.inMinutes % 60).clamp(0, 59);
+    _seconds = (widget.initialDuration.inSeconds % 60).clamp(0, 59);
+
+    _hoursController = FixedExtentScrollController(initialItem: _hours);
+    _minutesController = FixedExtentScrollController(initialItem: _minutes);
+    _secondsController = FixedExtentScrollController(initialItem: _seconds);
+  }
+
+  @override
+  void dispose() {
+    _hoursController.dispose();
+    _minutesController.dispose();
+    _secondsController.dispose();
+    super.dispose();
+  }
+
+  Duration get _totalDuration =>
+      Duration(hours: _hours, minutes: _minutes, seconds: _seconds);
+
+  void _step(
+    FixedExtentScrollController controller,
+    int current,
+    int delta,
+    int max,
+  ) {
+    final target = (current + delta).clamp(0, max);
+    controller.animateToItem(
+      target,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isZero = _totalDuration == Duration.zero;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 380),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(32),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(32),
+                color: const Color(0xee0e1824),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.15),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    blurRadius: 40,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Top navigation bar
+                  Row(
+                    children: [
+                      InkWell(
+                        onTap: () => Navigator.of(context).pop(),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              width: 1,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.close_rounded,
+                            size: 18,
+                            color: Colors.white70,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 34),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    widget.subtitle,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.white.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // 3-Wheel Drum Picker (Hours, Minutes, Seconds)
+                  SizedBox(
+                    height: 210,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        // Center selection lens
+                        Container(
+                          height: 46,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.15),
+                              width: 1,
+                            ),
+                          ),
+                        ),
+                        // Columns
+                        Row(
+                          children: [
+                            // Hours column
+                            Expanded(
+                              child: _buildDrumColumn(
+                                label: 'hours',
+                                controller: _hoursController,
+                                count: 24,
+                                selectedValue: _hours,
+                                onSelected: (v) => setState(() => _hours = v),
+                                unitSingular: 'hour',
+                                unitPlural: 'hours',
+                              ),
+                            ),
+                            // Minutes column
+                            Expanded(
+                              child: _buildDrumColumn(
+                                label: 'min',
+                                controller: _minutesController,
+                                count: 60,
+                                selectedValue: _minutes,
+                                onSelected: (v) => setState(() => _minutes = v),
+                                unitSingular: 'min',
+                                unitPlural: 'min',
+                              ),
+                            ),
+                            // Seconds column
+                            Expanded(
+                              child: _buildDrumColumn(
+                                label: 'sec',
+                                controller: _secondsController,
+                                count: 60,
+                                selectedValue: _seconds,
+                                onSelected: (v) => setState(() => _seconds = v),
+                                unitSingular: 'sec',
+                                unitPlural: 'sec',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Total duration preview
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 150),
+                    opacity: isZero ? 0.4 : 1.0,
+                    child: Text(
+                      isZero
+                          ? 'Select at least 1 second'
+                          : _formatSelectedSummary(),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isZero
+                            ? Colors.white38
+                            : widget.primaryColor.withValues(alpha: 0.9),
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Pill "Set Timer" Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: isZero
+                          ? null
+                          : () => Navigator.of(context).pop(_totalDuration),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xff0e1824),
+                        disabledBackgroundColor:
+                            Colors.white.withValues(alpha: 0.12),
+                        disabledForegroundColor: Colors.white38,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(28),
+                        ),
+                      ),
+                      child: Text(
+                        widget.buttonLabel,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatSelectedSummary() {
+    final parts = <String>[];
+    if (_hours > 0) parts.add('$_hours ${_hours == 1 ? 'hour' : 'hours'}');
+    if (_minutes > 0) parts.add('$_minutes min');
+    if (_seconds > 0) parts.add('$_seconds sec');
+    return 'Total: ${parts.join(' ')}';
+  }
+
+  Widget _buildDrumColumn({
+    required String label,
+    required FixedExtentScrollController controller,
+    required int count,
+    required int selectedValue,
+    required ValueChanged<int> onSelected,
+    required String unitSingular,
+    required String unitPlural,
+  }) {
+    return Column(
+      children: [
+        // Desktop quick increment up
+        InkWell(
+          onTap: () => _step(controller, selectedValue, -1, count - 1),
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
+            child: Icon(
+              Icons.keyboard_arrow_up_rounded,
+              size: 18,
+              color: Colors.white.withValues(alpha: 0.35),
+            ),
+          ),
+        ),
+        // Drum wheel
+        Expanded(
+          child: ListWheelScrollView.useDelegate(
+            controller: controller,
+            itemExtent: 44,
+            perspective: 0.003,
+            diameterRatio: 1.25,
+            physics: const FixedExtentScrollPhysics(),
+            onSelectedItemChanged: onSelected,
+            childDelegate: ListWheelChildBuilderDelegate(
+              childCount: count,
+              builder: (context, index) {
+                final isSelected = index == selectedValue;
+                final unit = index == 1 ? unitSingular : unitPlural;
+
+                return Center(
+                  child: AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 150),
+                    style: TextStyle(
+                      fontFamily: 'SF Pro',
+                      fontSize: isSelected ? 22 : 17,
+                      fontWeight:
+                          isSelected ? FontWeight.w700 : FontWeight.w400,
+                      color: isSelected
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.28),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text('$index'),
+                        if (isSelected) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            unit,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white.withValues(alpha: 0.75),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        // Desktop quick increment down
+        InkWell(
+          onTap: () => _step(controller, selectedValue, 1, count - 1),
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
+            child: Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 18,
+              color: Colors.white.withValues(alpha: 0.35),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
