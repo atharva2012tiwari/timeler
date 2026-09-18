@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Timeler
+Comment=Atmospheric focus timer with live weather transitions
+Exec=timeler
+Icon=${SNAP}/meta/gui/timeler.png
+Terminal=false
+Type=Application
+Categories=Utility;Clock;
+Keywords=timer;pomodoro;focus;clock;weather;productivity;
+StartupNotify=true
+StartupWMClass=timeler

@@ -1,0 +1,37 @@
+name: timeler
+base: core22
+version: '1.0.0'
+summary: Atmospheric focus & Pomodoro timer
+description: |
+  Timeler is an atmospheric focus and Pomodoro productivity timer with
+  cinematic transitions (Storm to Clear Sky, Night to Dawn, and Deep Ocean
+  to Surface Water).
+
+grade: stable
+confinement: strict
+
+apps:
+  timeler:
+    command: bin/timeler
+    extensions: [gnome]
+    plugs:
+      - desktop
+      - desktop-legacy
+      - wayland
+      - x11
+      - audio-playback
+      - sound-themes
+
+parts:
+  timeler:
+    plugin: dump
+    source: build/linux/x64/release/bundle
+    organize:
+      timeler: bin/timeler
+      lib/*: lib/
+      data/*: data/
+    stage-packages:
+      - libcanberra-gtk3-module
+      - gnome-session-canberra
+      - sound-theme-freedesktop
+      - alsa-utils
