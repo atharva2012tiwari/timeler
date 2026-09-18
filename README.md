@@ -35,14 +35,25 @@ Or open the **Ubuntu Software Center / Snap Store** app and search for **`timele
 Download the latest `.deb` package from our [Releases](https://github.com/atharva2012tiwari/timeler/releases) page, then install via:
 
 ```bash
-sudo dpkg -i timeler_1.0.0_amd64.deb
+sudo dpkg -i timeler_1.1.0_amd64.deb
+```
+
+### Fedora / RHEL / openSUSE (`.rpm`)
+
+Download the latest `.rpm` package from our [Releases](https://github.com/atharva2012tiwari/timeler/releases) page, then install via:
+
+```bash
+sudo dnf install ./timeler-1.1.0-1.x86_64.rpm
 ```
 
 ---
 
 ## ✨ Features
 
-- **Timer & Pomodoro Modes**: Seamlessly toggle between countdown sessions and Pomodoro cycles with work intervals, short breaks, and long breaks.
+- **Redesigned 3-Option Pomodoro Experience**: Direct, luxury glassmorphic cards for Focus, Short Break, and Long Break with quick steppers and round tracking.
+- **Step-by-Step Chime & Continue Flow**: Bell chime alerts when sessions finish, with smooth guided transitions to breaks and subsequent rounds.
+- **Precision Wheel Timer Picker**: Tactile drum-wheel picker with hours, minutes, and seconds selection.
+- **Focus Progress & Analytics**: Daily, weekly (with 7-day visualizer), monthly, and all-time productivity tracking and session history.
 - **Physics-Driven Particles**: Real-time canvas particle engines for rising bubbles and atmospheric rain.
 - **Glassmorphic UI**: Clean, distraction-free frosted interface with adaptive theme colors.
 - **Task Management**: Integrated inline focus task checklist.
