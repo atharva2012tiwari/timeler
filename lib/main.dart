@@ -374,15 +374,15 @@ class AtmosphereTheme {
         style: TextButton.styleFrom(foregroundColor: Colors.white70),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: surface.withValues(alpha: 0.4),
-        selectedColor: primary.withValues(alpha: 0.5),
-        side: BorderSide(color: border),
+        backgroundColor: Colors.white.withValues(alpha: 0.14),
+        selectedColor: primary.withValues(alpha: 0.45),
+        side: const BorderSide(color: Color(0x44ffffff)),
         labelStyle: const TextStyle(
           color: Colors.white,
           fontFamily: 'SF Pro',
-          fontWeight: FontWeight.w500,
+          fontWeight: FontWeight.w600,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );
   }
@@ -447,6 +447,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   // --- Tasks ---
   List<TaskItem> tasks = [];
   final _taskController = TextEditingController();
+  int _mobileTabIndex = 0;
 
   // --- Animation ---
   late final AnimationController _breathe = AnimationController(
@@ -932,6 +933,7 @@ class _WeatherTimerState extends State<WeatherTimer>
                             breakMinutes: breakMinutes,
                             longBreakMinutes: longBreakMinutes,
                             onSelectPhase: running ? null : selectPomodoroPhase,
+                            isMobile: isMobile,
                           );
                           final controls = _Controls(
                             running: running,
@@ -947,6 +949,7 @@ class _WeatherTimerState extends State<WeatherTimer>
                             onRemove: removeTask,
                             onAdd: addTask,
                             controller: _taskController,
+                            isMobile: isMobile,
                           );
                           return Padding(
                             padding: EdgeInsets.symmetric(
@@ -957,51 +960,243 @@ class _WeatherTimerState extends State<WeatherTimer>
                             children: [
                               // Quote
                               _QuoteBanner(atmosphere: currentAtmosphere),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 6),
                               // Header
-                              _Header(clear: clear, atmosphere: currentAtmosphere),
+                              _Header(
+                                clear: clear,
+                                atmosphere: currentAtmosphere,
+                                onSettingsPressed: _showSettingsDialog,
+                              ),
                               const SizedBox(height: 12),
                               // Main content
                               Expanded(
                                 child: compact
                                     ? SingleChildScrollView(
                                         child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
                                           children: [
                                             dial,
-                                            const SizedBox(height: 16),
-                                            controls,
-                                            const SizedBox(height: 24),
-                                            _SettingsPanel(
-                                              mode: mode,
-                                              onModeChanged: setMode,
-                                              minutes: minutes,
-                                              onSelect: select,
-                                              onCustom: customDuration,
-                                              controls: const SizedBox.shrink(),
-                                              running: running,
-                                              workMinutes: workMinutes,
-                                              breakMinutes: breakMinutes,
-                                              longBreakMinutes:
-                                                  longBreakMinutes,
-                                              totalRounds: totalRounds,
-                                              onPomodoroUpdate: updatePomodoro,
-                                              currentAtmosphere:
-                                                  currentAtmosphere,
-                                              onAtmosphereChanged: (v) =>
-                                                  setState(
-                                                    () => currentAtmosphere = v,
+                                            const SizedBox(height: 18),
+                                            Center(child: controls),
+                                            const SizedBox(height: 20),
+                                            if (isMobile) ...[
+                                              // Mobile Tab Selector (Focus Setup | Tasks)
+                                              Center(
+                                                child: Container(
+                                                  height: 38,
+                                                  constraints:
+                                                      const BoxConstraints(
+                                                    maxWidth: 320,
                                                   ),
-                                              pomodoroPhase: pomodoroPhase,
-                                              currentRound: currentRound,
-                                              onSelectPhase: selectPomodoroPhase,
-                                              onCustomPhaseDuration:
-                                                  customPomodoroPhaseDuration,
-                                            ),
-                                            const SizedBox(height: 16),
-                                            SizedBox(
-                                              height: 350,
-                                              child: taskPanel,
-                                            ),
+                                                  decoration: BoxDecoration(
+                                                    borderRadius:
+                                                        BorderRadius.circular(20),
+                                                    color: Colors.white
+                                                        .withValues(alpha: 0.12),
+                                                    border: Border.all(
+                                                      color: Colors.white
+                                                          .withValues(alpha: 0.22),
+                                                      width: 1,
+                                                    ),
+                                                  ),
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: GestureDetector(
+                                                          onTap: () => setState(
+                                                            () =>
+                                                                _mobileTabIndex = 0,
+                                                          ),
+                                                          behavior:
+                                                              HitTestBehavior
+                                                                  .opaque,
+                                                          child:
+                                                              AnimatedContainer(
+                                                            duration:
+                                                                const Duration(
+                                                              milliseconds: 200,
+                                                            ),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                18,
+                                                              ),
+                                                              color: _mobileTabIndex ==
+                                                                      0
+                                                                  ? Colors.white
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            0.25,
+                                                                      )
+                                                                  : Colors
+                                                                      .transparent,
+                                                            ),
+                                                            alignment:
+                                                                Alignment.center,
+                                                            child: Text(
+                                                              'Focus Setup',
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                fontWeight:
+                                                                    _mobileTabIndex ==
+                                                                            0
+                                                                        ? FontWeight
+                                                                            .w600
+                                                                        : FontWeight
+                                                                            .w400,
+                                                                color:
+                                                                    _mobileTabIndex ==
+                                                                            0
+                                                                        ? Colors
+                                                                            .white
+                                                                        : Colors
+                                                                            .white70,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      Expanded(
+                                                        child: GestureDetector(
+                                                          onTap: () => setState(
+                                                            () =>
+                                                                _mobileTabIndex = 1,
+                                                          ),
+                                                          behavior:
+                                                              HitTestBehavior
+                                                                  .opaque,
+                                                          child:
+                                                              AnimatedContainer(
+                                                            duration:
+                                                                const Duration(
+                                                              milliseconds: 200,
+                                                            ),
+                                                            decoration:
+                                                                BoxDecoration(
+                                                              borderRadius:
+                                                                  BorderRadius
+                                                                      .circular(
+                                                                18,
+                                                              ),
+                                                              color: _mobileTabIndex ==
+                                                                      1
+                                                                  ? Colors.white
+                                                                      .withValues(
+                                                                        alpha:
+                                                                            0.25,
+                                                                      )
+                                                                  : Colors
+                                                                      .transparent,
+                                                            ),
+                                                            alignment:
+                                                                Alignment.center,
+                                                            child: Text(
+                                                              tasks.isEmpty
+                                                                  ? 'Tasks'
+                                                                  : 'Tasks (${tasks.where((t) => !t.isCompleted).length})',
+                                                              style: TextStyle(
+                                                                fontSize: 12,
+                                                                fontWeight:
+                                                                    _mobileTabIndex ==
+                                                                            1
+                                                                        ? FontWeight
+                                                                            .w600
+                                                                        : FontWeight
+                                                                            .w400,
+                                                                color:
+                                                                    _mobileTabIndex ==
+                                                                            1
+                                                                        ? Colors
+                                                                            .white
+                                                                        : Colors
+                                                                            .white70,
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(height: 16),
+                                              _mobileTabIndex == 0
+                                                  ? _SettingsPanel(
+                                                      mode: mode,
+                                                      onModeChanged: setMode,
+                                                      minutes: minutes,
+                                                      onSelect: select,
+                                                      onCustom: customDuration,
+                                                      controls: const SizedBox
+                                                          .shrink(),
+                                                      running: running,
+                                                      workMinutes: workMinutes,
+                                                      breakMinutes: breakMinutes,
+                                                      longBreakMinutes:
+                                                          longBreakMinutes,
+                                                      totalRounds: totalRounds,
+                                                      onPomodoroUpdate:
+                                                          updatePomodoro,
+                                                      currentAtmosphere:
+                                                          currentAtmosphere,
+                                                      onAtmosphereChanged: (v) =>
+                                                          setState(
+                                                        () =>
+                                                            currentAtmosphere = v,
+                                                      ),
+                                                      pomodoroPhase:
+                                                          pomodoroPhase,
+                                                      currentRound: currentRound,
+                                                      onSelectPhase:
+                                                          selectPomodoroPhase,
+                                                      onCustomPhaseDuration:
+                                                          customPomodoroPhaseDuration,
+                                                      isMobile: isMobile,
+                                                    )
+                                                  : SizedBox(
+                                                      height: 380,
+                                                      child: taskPanel,
+                                                    ),
+                                            ] else ...[
+                                              _SettingsPanel(
+                                                mode: mode,
+                                                onModeChanged: setMode,
+                                                minutes: minutes,
+                                                onSelect: select,
+                                                onCustom: customDuration,
+                                                controls: const SizedBox.shrink(),
+                                                running: running,
+                                                workMinutes: workMinutes,
+                                                breakMinutes: breakMinutes,
+                                                longBreakMinutes:
+                                                    longBreakMinutes,
+                                                totalRounds: totalRounds,
+                                                onPomodoroUpdate:
+                                                    updatePomodoro,
+                                                currentAtmosphere:
+                                                    currentAtmosphere,
+                                                onAtmosphereChanged: (v) =>
+                                                    setState(
+                                                  () => currentAtmosphere = v,
+                                                ),
+                                                pomodoroPhase: pomodoroPhase,
+                                                currentRound: currentRound,
+                                                onSelectPhase:
+                                                    selectPomodoroPhase,
+                                                onCustomPhaseDuration:
+                                                    customPomodoroPhaseDuration,
+                                                isMobile: false,
+                                              ),
+                                              const SizedBox(height: 16),
+                                              SizedBox(
+                                                height: 350,
+                                                child: taskPanel,
+                                              ),
+                                            ],
+                                            const SizedBox(height: 24),
                                           ],
                                         ),
                                       )
@@ -1011,41 +1206,45 @@ class _WeatherTimerState extends State<WeatherTimer>
                                           const SizedBox(width: 24),
                                           Expanded(
                                             flex: 2,
-                                            child: Column(
-                                              children: [
-                                                _SettingsPanel(
-                                                  mode: mode,
-                                                  onModeChanged: setMode,
-                                                  minutes: minutes,
-                                                  onSelect: select,
-                                                  onCustom: customDuration,
-                                                  controls: controls,
-                                                  running: running,
-                                                  workMinutes: workMinutes,
-                                                  breakMinutes: breakMinutes,
-                                                  longBreakMinutes:
-                                                      longBreakMinutes,
-                                                  totalRounds: totalRounds,
-                                                  onPomodoroUpdate:
-                                                      updatePomodoro,
-                                                  currentAtmosphere:
-                                                      currentAtmosphere,
-                                                  onAtmosphereChanged: (v) =>
-                                                      setState(
-                                                        () =>
-                                                            currentAtmosphere =
-                                                                v,
-                                                      ),
-                                                  pomodoroPhase: pomodoroPhase,
-                                                  currentRound: currentRound,
-                                                  onSelectPhase:
-                                                      selectPomodoroPhase,
-                                                  onCustomPhaseDuration:
-                                                      customPomodoroPhaseDuration,
-                                                ),
-                                                const SizedBox(height: 16),
-                                                Expanded(child: taskPanel),
-                                              ],
+                                            child: SingleChildScrollView(
+                                              child: Column(
+                                                children: [
+                                                  _SettingsPanel(
+                                                    mode: mode,
+                                                    onModeChanged: setMode,
+                                                    minutes: minutes,
+                                                    onSelect: select,
+                                                    onCustom: customDuration,
+                                                    controls: controls,
+                                                    running: running,
+                                                    workMinutes: workMinutes,
+                                                    breakMinutes: breakMinutes,
+                                                    longBreakMinutes:
+                                                        longBreakMinutes,
+                                                    totalRounds: totalRounds,
+                                                    onPomodoroUpdate:
+                                                        updatePomodoro,
+                                                    currentAtmosphere:
+                                                        currentAtmosphere,
+                                                    onAtmosphereChanged: (v) =>
+                                                        setState(
+                                                      () =>
+                                                          currentAtmosphere = v,
+                                                    ),
+                                                    pomodoroPhase: pomodoroPhase,
+                                                    currentRound: currentRound,
+                                                    onSelectPhase:
+                                                        selectPomodoroPhase,
+                                                    onCustomPhaseDuration:
+                                                        customPomodoroPhaseDuration,
+                                                  ),
+                                                  const SizedBox(height: 16),
+                                                  SizedBox(
+                                                    height: 350,
+                                                    child: taskPanel,
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
                                         ],
@@ -1060,30 +1259,6 @@ class _WeatherTimerState extends State<WeatherTimer>
                 ),
               );
             },
-          ),
-
-          // Settings Icon (Bottom Left)
-          Positioned(
-            left: 24,
-            bottom: 24,
-            child: Tooltip(
-              message: 'Settings',
-              child: Material(
-                color: Colors.transparent,
-                shape: const CircleBorder(),
-                clipBehavior: Clip.antiAlias,
-                child: IconButton(
-                  onPressed: _showSettingsDialog,
-                  icon: Icon(
-                    Icons.settings_outlined,
-                    color: Colors.white.withValues(alpha: 0.75),
-                    size: 24,
-                  ),
-                  splashRadius: 24,
-                  hoverColor: Colors.white.withValues(alpha: 0.12),
-                ),
-              ),
-            ),
           ),
 
           // Completion overlay
@@ -1147,9 +1322,14 @@ class _QuoteBanner extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _Header extends StatelessWidget {
-  const _Header({required this.clear, required this.atmosphere});
+  const _Header({
+    required this.clear,
+    required this.atmosphere,
+    this.onSettingsPressed,
+  });
   final double clear;
   final AtmosphereType atmosphere;
+  final VoidCallback? onSettingsPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1184,12 +1364,12 @@ class _Header extends StatelessWidget {
     return Row(
       children: [
         Icon(headerIcon, size: 18, color: color),
-        const SizedBox(width: 10),
+        const SizedBox(width: 6),
         Text(
           'TIMELER',
           style: TextStyle(
-            letterSpacing: 6,
-            fontSize: 13,
+            letterSpacing: 3,
+            fontSize: 12,
             fontWeight: FontWeight.w600,
             color: color,
           ),
@@ -1197,17 +1377,46 @@ class _Header extends StatelessWidget {
         const Spacer(),
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 600),
-          child: Text(
-            label,
-            key: ValueKey(key),
-            style: TextStyle(
-              fontSize: 10,
-              letterSpacing: 4,
-              fontWeight: FontWeight.w500,
-              color: color,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.white.withValues(alpha: 0.12),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.22),
+                width: 1,
+              ),
+            ),
+            child: Text(
+              label,
+              key: ValueKey(key),
+              style: TextStyle(
+                fontSize: 9.5,
+                letterSpacing: 1.5,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
             ),
           ),
         ),
+        if (onSettingsPressed != null) ...[
+          const SizedBox(width: 4),
+          Tooltip(
+            message: 'Settings',
+            child: SizedBox(
+              width: 32,
+              height: 32,
+              child: IconButton(
+                onPressed: onSettingsPressed,
+                icon: const Icon(Icons.settings_outlined, size: 18),
+                color: color,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                splashRadius: 16,
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1568,11 +1777,14 @@ class _ModeToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 40,
+      height: 42,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white.withValues(alpha: 0.08),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+        borderRadius: BorderRadius.circular(14),
+        color: Colors.white.withValues(alpha: 0.12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.22),
+          width: 1,
+        ),
       ),
       child: LayoutBuilder(
         builder: (_, constraints) {
@@ -1588,8 +1800,15 @@ class _ModeToggle extends StatelessWidget {
                 width: half - 2,
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    color: Colors.white.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(12),
+                    color: Colors.white.withValues(alpha: 0.24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.15),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1609,7 +1828,7 @@ class _ModeToggle extends StatelessWidget {
                                 : FontWeight.w400,
                             color: mode == TimerMode.timer
                                 ? Colors.white
-                                : Colors.white54,
+                                : Colors.white70,
                           ),
                         ),
                       ),
@@ -1629,7 +1848,7 @@ class _ModeToggle extends StatelessWidget {
                                 : FontWeight.w400,
                             color: mode == TimerMode.pomodoro
                                 ? Colors.white
-                                : Colors.white54,
+                                : Colors.white70,
                           ),
                         ),
                       ),
@@ -1663,6 +1882,7 @@ class _TimerDial extends StatelessWidget {
     this.breakMinutes = 5,
     this.longBreakMinutes = 15,
     this.onSelectPhase,
+    this.isMobile = false,
   });
 
   final String clock;
@@ -1677,6 +1897,7 @@ class _TimerDial extends StatelessWidget {
   final int breakMinutes;
   final int longBreakMinutes;
   final ValueChanged<PomodoroPhase>? onSelectPhase;
+  final bool isMobile;
 
   @override
   Widget build(BuildContext context) {
@@ -1689,19 +1910,22 @@ class _TimerDial extends StatelessWidget {
 
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 440, maxHeight: 330),
+        constraints: BoxConstraints(
+          maxWidth: isMobile ? 500 : 440,
+          maxHeight: isMobile ? double.infinity : 330,
+        ),
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(36),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.5),
-                blurRadius: 60,
-                offset: const Offset(0, 20),
+                color: Colors.black.withValues(alpha: 0.25),
+                blurRadius: 40,
+                offset: const Offset(0, 12),
               ),
               BoxShadow(
-                color: glowColor.withValues(alpha: 0.12 + breathe * 0.06),
-                blurRadius: 80,
+                color: glowColor.withValues(alpha: 0.18 + breathe * 0.08),
+                blurRadius: 70,
                 spreadRadius: 2,
               ),
             ],
@@ -1709,26 +1933,26 @@ class _TimerDial extends StatelessWidget {
           child: ClipRRect(
             borderRadius: BorderRadius.circular(36),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+              filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 600),
                 curve: Curves.easeInOut,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 40,
-                  vertical: 24,
+                padding: EdgeInsets.symmetric(
+                  horizontal: isMobile ? 24 : 40,
+                  vertical: isMobile ? 28 : 24,
                 ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(36),
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.15),
-                    width: 1,
+                    color: Colors.white.withValues(alpha: 0.28),
+                    width: 1.2,
                   ),
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
+                      Colors.white.withValues(alpha: 0.24),
                       Colors.white.withValues(alpha: 0.12),
-                      Colors.white.withValues(alpha: 0.04),
                     ],
                   ),
                 ),
@@ -1782,9 +2006,13 @@ class _TimerDial extends StatelessWidget {
                       style: TextStyle(
                         fontFamily: 'SF Pro',
                         color: Colors.white,
-                        fontSize: clock.length > 5 ? 56 : 80,
+                        fontSize: clock.length > 5
+                            ? (isMobile ? 48 : 56)
+                            : (isMobile ? 72 : 80),
                         fontWeight: FontWeight.w300,
-                        letterSpacing: clock.length > 5 ? 3 : 8,
+                        letterSpacing: clock.length > 5
+                            ? 2
+                            : (isMobile ? 5 : 8),
                         height: 1.0,
                         shadows: [
                           Shadow(
@@ -1814,30 +2042,52 @@ class _TimerDial extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
 
-                    // Session name
-                    SizedBox(
-                      width: 220,
-                      child: TextField(
-                        controller: sessionNameController,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.7),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w400,
+                    // Session name (intentional frosted capsule)
+                    Container(
+                      width: 230,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        color: Colors.white.withValues(alpha: 0.12),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.22),
+                          width: 1,
                         ),
-                        decoration: InputDecoration(
-                          hintText: 'Name this session\u2026',
-                          hintStyle: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.25),
-                            fontSize: 12,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.edit_note_rounded,
+                            size: 16,
+                            color: Colors.white.withValues(alpha: 0.6),
                           ),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(
-                            vertical: 6,
-                            horizontal: 12,
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: TextField(
+                              controller: sessionNameController,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.85),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w400,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: 'Name this session\u2026',
+                                hintStyle: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.35),
+                                  fontSize: 12,
+                                ),
+                                border: InputBorder.none,
+                                isDense: true,
+                                contentPadding: EdgeInsets.zero,
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
                   ],
@@ -1878,13 +2128,13 @@ class _DialPhasePill extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
             color: isActive
-                ? accentColor.withValues(alpha: 0.22)
-                : Colors.white.withValues(alpha: 0.05),
+                ? accentColor.withValues(alpha: 0.28)
+                : Colors.white.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: isActive
-                  ? accentColor.withValues(alpha: 0.6)
-                  : Colors.white.withValues(alpha: 0.08),
+                  ? accentColor.withValues(alpha: 0.7)
+                  : Colors.white.withValues(alpha: 0.20),
               width: 1,
             ),
           ),
@@ -1893,7 +2143,7 @@ class _DialPhasePill extends StatelessWidget {
             style: TextStyle(
               color: isActive
                   ? accentColor
-                  : Colors.white.withValues(alpha: 0.6),
+                  : Colors.white.withValues(alpha: 0.8),
               fontSize: 11,
               fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
               letterSpacing: 0.3,
@@ -1929,6 +2179,7 @@ class _SettingsPanel extends StatelessWidget {
     this.currentRound = 1,
     this.onSelectPhase,
     this.onCustomPhaseDuration,
+    this.isMobile = false,
   });
 
   final TimerMode mode;
@@ -1947,44 +2198,48 @@ class _SettingsPanel extends StatelessWidget {
   final int currentRound;
   final ValueChanged<PomodoroPhase>? onSelectPhase;
   final ValueChanged<PomodoroPhase>? onCustomPhaseDuration;
+  final bool isMobile;
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 360),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(32),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 50,
-              offset: const Offset(0, 16),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(32),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(32),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  width: 1,
-                ),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withValues(alpha: 0.1),
-                    Colors.white.withValues(alpha: 0.02),
-                  ],
-                ),
+    final panel = Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 40,
+            offset: const Offset(0, 12),
+          ),
+          BoxShadow(
+            color: Colors.white.withValues(alpha: 0.05),
+            blurRadius: 10,
+            spreadRadius: -2,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+          child: Container(
+            padding: EdgeInsets.all(isMobile ? 20 : 24),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(32),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.28),
+                width: 1.2,
               ),
-              child: Column(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withValues(alpha: 0.22),
+                  Colors.white.withValues(alpha: 0.10),
+                ],
+              ),
+            ),
+            child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -2155,7 +2410,14 @@ class _SettingsPanel extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      );
+
+    if (isMobile) {
+      return panel;
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 360),
+      child: panel,
     );
   }
 }
@@ -2301,36 +2563,40 @@ class _PomodoroPhaseOptionCard extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 2),
-                    InkWell(
-                      onTap: enabled ? onCustomDuration : null,
-                      borderRadius: BorderRadius.circular(6),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            '$minutes',
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.white,
-                              fontFeatures: [FontFeature.tabularFigures()],
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: InkWell(
+                        onTap: enabled ? onCustomDuration : null,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '$minutes',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
                             ),
-                          ),
-                          Text(
-                            ' min',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w400,
-                              color: Colors.white.withValues(alpha: 0.65),
+                            Text(
+                              ' min',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w400,
+                                color: Colors.white.withValues(alpha: 0.65),
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.edit_rounded,
-                            size: 11,
-                            color: Colors.white.withValues(alpha: 0.35),
-                          ),
-                        ],
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.edit_rounded,
+                              size: 11,
+                              color: Colors.white.withValues(alpha: 0.35),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -2516,6 +2782,7 @@ class _Controls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final label = actionLabel ?? (running ? 'Pause' : 'Begin focus');
     final icon = running
         ? Icons.pause_rounded
@@ -2529,30 +2796,56 @@ class _Controls extends StatelessWidget {
       spacing: 16,
       runSpacing: 10,
       children: [
-        TextButton.icon(
+        OutlinedButton.icon(
           onPressed: onReset,
           icon: const Icon(Icons.replay_rounded, size: 18),
           label: const Text('Reset'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white.withValues(alpha: 0.9),
+            side: BorderSide(
+              color: Colors.white.withValues(alpha: 0.25),
+              width: 1,
+            ),
+            backgroundColor: Colors.white.withValues(alpha: 0.10),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 14,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
         ),
         FilledButton.icon(
           onPressed: onToggle,
           icon: Icon(icon, size: 20),
           label: Text(
             label,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
           ),
-          style: isWaiting
-              ? FilledButton.styleFrom(
-                  backgroundColor: const Color(0xfff0c060),
-                  foregroundColor: Colors.black87,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 22,
-                    vertical: 12,
-                  ),
-                  elevation: 6,
-                  shadowColor: const Color(0xfff0c060).withValues(alpha: 0.4),
-                )
-              : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: isWaiting
+                ? const Color(0xfff0c060)
+                : (running
+                    ? Colors.white.withValues(alpha: 0.22)
+                    : theme.colorScheme.primary.withValues(alpha: 0.90)),
+            foregroundColor: isWaiting ? Colors.black87 : Colors.white,
+            padding: const EdgeInsets.symmetric(
+              horizontal: 26,
+              vertical: 14,
+            ),
+            elevation: 8,
+            shadowColor: (isWaiting
+                    ? const Color(0xfff0c060)
+                    : theme.colorScheme.primary)
+                .withValues(alpha: 0.45),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
         ),
       ],
     );
@@ -2741,6 +3034,7 @@ class _TaskListPanel extends StatelessWidget {
     required this.onRemove,
     required this.onAdd,
     required this.controller,
+    this.isMobile = false,
   });
 
   final List<TaskItem> tasks;
@@ -2748,44 +3042,48 @@ class _TaskListPanel extends StatelessWidget {
   final ValueChanged<int> onRemove;
   final ValueChanged<String> onAdd;
   final TextEditingController controller;
+  final bool isMobile;
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 340),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(32),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.35),
-              blurRadius: 50,
-              offset: const Offset(0, 16),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(32),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(32),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.12),
-                  width: 1,
-                ),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withValues(alpha: 0.1),
-                    Colors.white.withValues(alpha: 0.02),
-                  ],
-                ),
+    final panel = Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(32),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 40,
+            offset: const Offset(0, 12),
+          ),
+          BoxShadow(
+            color: Colors.white.withValues(alpha: 0.05),
+            blurRadius: 10,
+            spreadRadius: -2,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+          child: Container(
+            padding: EdgeInsets.all(isMobile ? 20 : 24),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(32),
+              border: Border.all(
+                color: Colors.white.withValues(alpha: 0.28),
+                width: 1.2,
               ),
-              child: Column(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white.withValues(alpha: 0.22),
+                  Colors.white.withValues(alpha: 0.10),
+                ],
+              ),
+            ),
+            child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
@@ -2875,11 +3173,15 @@ class _TaskListPanel extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Container(
-                    height: 36,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    height: 40,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(12),
+                      color: Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.22),
+                        width: 1,
+                      ),
                     ),
                     child: Center(
                       child: TextField(
@@ -2890,7 +3192,7 @@ class _TaskListPanel extends StatelessWidget {
                           hintText: 'Add a new task... (Press Enter)',
                           hintStyle: TextStyle(
                             fontSize: 13,
-                            color: Colors.white.withValues(alpha: 0.4),
+                            color: Colors.white.withValues(alpha: 0.45),
                           ),
                           border: InputBorder.none,
                           isDense: true,
@@ -2904,7 +3206,14 @@ class _TaskListPanel extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      );
+
+    if (isMobile) {
+      return panel;
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 340),
+      child: panel,
     );
   }
 }
