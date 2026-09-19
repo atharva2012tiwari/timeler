@@ -4,7 +4,7 @@
 
   # ⏱️ Timeler
 
-  **An immersive atmospheric focus & Pomodoro productivity suite for Linux & Android.**  
+  **An immersive atmospheric focus & Pomodoro productivity suite for Linux, Android & Windows.**  
   *Transform your workspace into living weather horizons that evolve as you work.*
 
   <br>
@@ -17,6 +17,7 @@
   [![License: MIT](https://img.shields.io/badge/License-MIT-10B981?style=for-the-badge)](LICENSE)
   [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://snapcraft.io/timeler)
   [![Platform: Android](https://img.shields.io/badge/Platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/atharva2012tiwari/timeler/releases/latest)
+  [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/atharva2012tiwari/timeler/releases/latest)
   [![Built with Flutter](https://img.shields.io/badge/Built_with-Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
   [![Privacy](https://img.shields.io/badge/Privacy-100%25_Offline-8B5CF6?style=for-the-badge)](README.md)
   [![GitHub Stars](https://img.shields.io/github/stars/atharva2012tiwari/timeler?style=for-the-badge&color=EAB308)](https://github.com/atharva2012tiwari/timeler/stargazers)
@@ -51,6 +52,7 @@
   - [Fedora / RHEL / openSUSE (`.rpm`)](#4-fedora--rhel--opensuse-rpm)
   - [Arch Linux / Manjaro (AUR)](#5-arch-linux--manjaro-aur)
   - [Portable Universal Linux Tarball](#6-portable-universal-linux-tarball)
+  - [Windows (x64)](#7-windows-x64)
 - [🛠️ Building from Source](#️-building-from-source)
 - [🤝 Contributing & Community](#-contributing--community)
 - [📄 License](#-license)
@@ -241,6 +243,15 @@ wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timel
 tar -xzf timeler-1.2.0-linux-x64.tar.gz
 ./timeler/timeler
 ```
+
+---
+
+### 7. Windows (x64)
+Download the standalone zip bundle from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
+
+1. Download [`timeler-1.2.0-windows-x64.zip`](https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timeler-1.2.0-windows-x64.zip).
+2. Extract the archive to any directory.
+3. Double-click `timeler.exe` to launch.
 
 ---
 
