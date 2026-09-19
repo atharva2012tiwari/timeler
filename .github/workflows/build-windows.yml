@@ -43,15 +43,19 @@ jobs:
       - name: Package Windows Bundle
         shell: pwsh
         run: |
-          $releaseDir = Get-ChildItem -Path "build\windows" -Recurse -Directory -Filter "Release" | Select-Object -First 1
-          if (-not $releaseDir) {
-            Write-Error "Release directory not found!"
+          $releaseDir = "build\windows\x64\runner\Release"
+          if (-not (Test-Path $releaseDir)) {
+            $releaseDir = "build\windows\runner\Release"
+          }
+          if (-not (Test-Path $releaseDir)) {
+            Write-Error "Release directory not found at $releaseDir!"
             exit 1
           }
-          Write-Host "Found release directory: $($releaseDir.FullName)"
+          Write-Host "Found release directory: $releaseDir"
+          Get-ChildItem $releaseDir
           New-Item -ItemType Directory -Force -Path "dist"
           $zipPath = "dist\timeler-1.2.0-windows-x64.zip"
-          Compress-Archive -Path "$($releaseDir.FullName)\*" -DestinationPath $zipPath -Force
+          Compress-Archive -Path "$releaseDir\*" -DestinationPath $zipPath -Force
           Write-Host "Windows package created at $zipPath"
           Get-Item $zipPath | Select-Object Name, Length
 
