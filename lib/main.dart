@@ -430,6 +430,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   bool running = false;
   TimerMode mode = TimerMode.timer;
   bool showCompletion = false;
+  bool _sessionActive = false;
 
   // --- Session name ---
   final _sessionNameController = TextEditingController();
@@ -455,6 +456,16 @@ class _WeatherTimerState extends State<WeatherTimer>
     duration: const Duration(seconds: 6),
   )..repeat(reverse: true);
 
+  late final AnimationController _sessionTransition = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 700),
+  );
+  late final Animation<double> _sessionCurved = CurvedAnimation(
+    parent: _sessionTransition,
+    curve: Curves.easeInOutCubicEmphasized,
+    reverseCurve: Curves.easeInOutCubic,
+  );
+
   @override
   void initState() {
     super.initState();
@@ -465,6 +476,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   void dispose() {
     ticker?.cancel();
     _breathe.dispose();
+    _sessionTransition.dispose();
     _sessionNameController.dispose();
     _taskController.dispose();
     SoundPlayer.stop();
@@ -571,8 +583,10 @@ class _WeatherTimerState extends State<WeatherTimer>
         setState(() {
           left = Duration.zero;
           running = false;
+          _sessionActive = false;
           showCompletion = true;
         });
+        _sessionTransition.reverse();
         final sName = _sessionNameController.text.trim();
         final durationMins = timerDuration.inMinutes > 0
             ? timerDuration.inMinutes
@@ -620,9 +634,11 @@ class _WeatherTimerState extends State<WeatherTimer>
       SoundPlayer.playCompletion();
       setState(() {
         running = false;
+        _sessionActive = false;
         showCompletion = true;
         pomodoroWaitingForNextPhase = false;
       });
+      _sessionTransition.reverse();
     } else {
       SoundPlayer.playPhaseEnd();
       setState(() {
@@ -661,7 +677,11 @@ class _WeatherTimerState extends State<WeatherTimer>
       }
     }
     _startTicker();
-    setState(() => running = true);
+    setState(() {
+      running = true;
+      _sessionActive = true;
+    });
+    _sessionTransition.forward();
   }
 
   void reset() {
@@ -669,6 +689,7 @@ class _WeatherTimerState extends State<WeatherTimer>
     SoundPlayer.stop();
     setState(() {
       running = false;
+      _sessionActive = false;
       showCompletion = false;
       pomodoroWaitingForNextPhase = false;
       if (mode == TimerMode.timer) {
@@ -680,9 +701,11 @@ class _WeatherTimerState extends State<WeatherTimer>
         _pomodoroAccumulatedMs = 0;
       }
     });
+    _sessionTransition.reverse();
   }
 
   void select(int value) {
+    if (_sessionActive) return;
     ticker?.cancel();
     setState(() {
       minutes = value;
@@ -694,7 +717,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   }
 
   void selectDuration(Duration duration) {
-    if (duration <= Duration.zero) return;
+    if (_sessionActive || duration <= Duration.zero) return;
     ticker?.cancel();
     setState(() {
       minutes = duration.inMinutes;
@@ -706,7 +729,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   }
 
   void setMode(TimerMode newMode) {
-    if (newMode == mode) return;
+    if (_sessionActive || newMode == mode) return;
     ticker?.cancel();
     SoundPlayer.stop();
     setState(() {
@@ -726,7 +749,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   }
 
   void updatePomodoro({int? work, int? brk, int? longBrk, int? rounds}) {
-    if (running) return;
+    if (_sessionActive || running) return;
     setState(() {
       if (work != null) workMinutes = work.clamp(1, 120);
       if (brk != null) breakMinutes = brk.clamp(1, 30);
@@ -744,7 +767,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   }
 
   void selectPomodoroPhase(PomodoroPhase phase) {
-    if (running) return;
+    if (_sessionActive || running) return;
     setState(() {
       pomodoroPhase = phase;
       pomodoroWaitingForNextPhase = false;
@@ -763,7 +786,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   }
 
   Future<void> customPomodoroPhaseDuration(PomodoroPhase phase) async {
-    if (running) return;
+    if (_sessionActive || running) return;
     final initial = switch (phase) {
       PomodoroPhase.work => Duration(minutes: workMinutes),
       PomodoroPhase.shortBreak => Duration(minutes: breakMinutes),
@@ -818,6 +841,7 @@ class _WeatherTimerState extends State<WeatherTimer>
     SoundPlayer.stop();
     setState(() {
       showCompletion = false;
+      _sessionActive = false;
       pomodoroWaitingForNextPhase = false;
       if (mode == TimerMode.pomodoro) {
         currentRound = 1;
@@ -828,6 +852,7 @@ class _WeatherTimerState extends State<WeatherTimer>
         left = Duration(minutes: minutes);
       }
     });
+    _sessionTransition.reverse();
   }
 
   void addTask(String title) {
@@ -881,6 +906,7 @@ class _WeatherTimerState extends State<WeatherTimer>
   }
 
   Future<void> customDuration() async {
+    if (_sessionActive) return;
     final result = await showDialog<Duration>(
       context: context,
       barrierColor: Colors.black.withValues(alpha: 0.65),
@@ -902,17 +928,30 @@ class _WeatherTimerState extends State<WeatherTimer>
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Main UI
-          AnimatedBuilder(
-            animation: _breathe,
-            builder: (context, _) {
-              return Theme(
-                data: AtmosphereTheme.lerp(clear, currentAtmosphere),
-                child: _ImmersiveBackdrop(
+          // 1. Isolated atmospheric background (only repaints on breath/particle ticks)
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: AnimatedBuilder(
+                animation: _breathe,
+                builder: (context, _) => _ImmersiveBackdrop(
                   atmosphere: currentAtmosphere,
                   clear: clear,
                   breathe: _breathe.value,
-                  child: SafeArea(
+                ),
+              ),
+            ),
+          ),
+
+          // 2. Main UI Layer (smoothly animated during session transition, zero unnecessary ticks when idle)
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: AnimatedBuilder(
+                animation: _sessionCurved,
+                builder: (context, _) {
+                  final sessionProgress = _sessionCurved.value;
+                  return Theme(
+                    data: AtmosphereTheme.lerp(clear, currentAtmosphere),
+                    child: SafeArea(
                     child: LayoutBuilder(
                       builder: (_, box) {
                         final isMobile = box.maxWidth < 600;
@@ -921,42 +960,77 @@ class _WeatherTimerState extends State<WeatherTimer>
                             isMobile ? 16.0 : (compact ? 24.0 : 40.0);
                         final verticalPadding = isMobile ? 12.0 : 24.0;
                         final dial = _TimerDial(
-                            clock: clock,
-                            clear: clear,
+                          clock: clock,
+                          clear: clear,
+                          running: running,
+                          statusText: statusText,
+                          sessionNameController: _sessionNameController,
+                          isPomodoro: mode == TimerMode.pomodoro,
+                          pomodoroPhase: pomodoroPhase,
+                          workMinutes: workMinutes,
+                          breakMinutes: breakMinutes,
+                          longBreakMinutes: longBreakMinutes,
+                          onSelectPhase:
+                              _sessionActive ? null : selectPomodoroPhase,
+                          isMobile: isMobile,
+                          sessionProgress: sessionProgress,
+                          isSessionActive: _sessionActive,
+                        );
+                        final controls = _Controls(
+                          running: running,
+                          onToggle: toggle,
+                          onReset: reset,
+                          actionLabel: mainActionLabel,
+                          isWaiting: mode == TimerMode.pomodoro &&
+                              pomodoroWaitingForNextPhase,
+                        );
+                        final taskPanel = _TaskListPanel(
+                          tasks: tasks,
+                          onToggle: toggleTask,
+                          onRemove: removeTask,
+                          onAdd: addTask,
+                          controller: _taskController,
+                          isMobile: isMobile,
+                        );
+
+                        Widget buildSettingsPanel({
+                          bool isMobilePanel = false,
+                          Widget panelControls = const SizedBox.shrink(),
+                        }) {
+                          return _SettingsPanel(
+                            mode: mode,
+                            onModeChanged: setMode,
+                            minutes: minutes,
+                            onSelect: select,
+                            onCustom: customDuration,
+                            controls: panelControls,
                             running: running,
-                            breathe: _breathe.value,
-                            statusText: statusText,
-                            sessionNameController: _sessionNameController,
-                            isPomodoro: mode == TimerMode.pomodoro,
-                            pomodoroPhase: pomodoroPhase,
                             workMinutes: workMinutes,
                             breakMinutes: breakMinutes,
                             longBreakMinutes: longBreakMinutes,
-                            onSelectPhase: running ? null : selectPomodoroPhase,
-                            isMobile: isMobile,
+                            totalRounds: totalRounds,
+                            onPomodoroUpdate: updatePomodoro,
+                            currentAtmosphere: currentAtmosphere,
+                            onAtmosphereChanged: (v) =>
+                                setState(() => currentAtmosphere = v),
+                            pomodoroPhase: pomodoroPhase,
+                            currentRound: currentRound,
+                            onSelectPhase: selectPomodoroPhase,
+                            onCustomPhaseDuration:
+                                customPomodoroPhaseDuration,
+                            isMobile: isMobilePanel,
+                            isSessionActive: _sessionActive,
+                            sessionName: _sessionNameController.text.trim(),
+                            timerDuration: timerDuration,
                           );
-                          final controls = _Controls(
-                            running: running,
-                            onToggle: toggle,
-                            onReset: reset,
-                            actionLabel: mainActionLabel,
-                            isWaiting: mode == TimerMode.pomodoro &&
-                                pomodoroWaitingForNextPhase,
-                          );
-                          final taskPanel = _TaskListPanel(
-                            tasks: tasks,
-                            onToggle: toggleTask,
-                            onRemove: removeTask,
-                            onAdd: addTask,
-                            controller: _taskController,
-                            isMobile: isMobile,
-                          );
-                          return Padding(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: horizontalPadding,
-                              vertical: verticalPadding,
-                            ),
-                            child: Column(
+                        }
+
+                        return Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                            vertical: verticalPadding,
+                          ),
+                          child: Column(
                             children: [
                               // Quote
                               _QuoteBanner(atmosphere: currentAtmosphere),
@@ -971,283 +1045,380 @@ class _WeatherTimerState extends State<WeatherTimer>
                               // Main content
                               Expanded(
                                 child: compact
-                                    ? SingleChildScrollView(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.stretch,
-                                          children: [
-                                            dial,
-                                            const SizedBox(height: 18),
-                                            Center(child: controls),
-                                            const SizedBox(height: 20),
-                                            if (isMobile) ...[
-                                              // Mobile Tab Selector (Focus Setup | Tasks)
-                                              Center(
-                                                child: Container(
-                                                  height: 38,
-                                                  constraints:
-                                                      const BoxConstraints(
-                                                    maxWidth: 320,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    borderRadius:
-                                                        BorderRadius.circular(20),
-                                                    color: Colors.white
-                                                        .withValues(alpha: 0.12),
-                                                    border: Border.all(
-                                                      color: Colors.white
-                                                          .withValues(alpha: 0.22),
-                                                      width: 1,
-                                                    ),
-                                                  ),
-                                                  child: Row(
-                                                    children: [
-                                                      Expanded(
-                                                        child: GestureDetector(
-                                                          onTap: () => setState(
-                                                            () =>
-                                                                _mobileTabIndex = 0,
-                                                          ),
-                                                          behavior:
-                                                              HitTestBehavior
-                                                                  .opaque,
-                                                          child:
-                                                              AnimatedContainer(
-                                                            duration:
-                                                                const Duration(
-                                                              milliseconds: 200,
-                                                            ),
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                18,
-                                                              ),
-                                                              color: _mobileTabIndex ==
-                                                                      0
-                                                                  ? Colors.white
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.25,
-                                                                      )
-                                                                  : Colors
-                                                                      .transparent,
-                                                            ),
-                                                            alignment:
-                                                                Alignment.center,
-                                                            child: Text(
-                                                              'Focus Setup',
-                                                              style: TextStyle(
-                                                                fontSize: 12,
-                                                                fontWeight:
-                                                                    _mobileTabIndex ==
-                                                                            0
-                                                                        ? FontWeight
-                                                                            .w600
-                                                                        : FontWeight
-                                                                            .w400,
-                                                                color:
-                                                                    _mobileTabIndex ==
-                                                                            0
-                                                                        ? Colors
-                                                                            .white
-                                                                        : Colors
-                                                                            .white70,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                      Expanded(
-                                                        child: GestureDetector(
-                                                          onTap: () => setState(
-                                                            () =>
-                                                                _mobileTabIndex = 1,
-                                                          ),
-                                                          behavior:
-                                                              HitTestBehavior
-                                                                  .opaque,
-                                                          child:
-                                                              AnimatedContainer(
-                                                            duration:
-                                                                const Duration(
-                                                              milliseconds: 200,
-                                                            ),
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              borderRadius:
-                                                                  BorderRadius
-                                                                      .circular(
-                                                                18,
-                                                              ),
-                                                              color: _mobileTabIndex ==
-                                                                      1
-                                                                  ? Colors.white
-                                                                      .withValues(
-                                                                        alpha:
-                                                                            0.25,
-                                                                      )
-                                                                  : Colors
-                                                                      .transparent,
-                                                            ),
-                                                            alignment:
-                                                                Alignment.center,
-                                                            child: Text(
-                                                              tasks.isEmpty
-                                                                  ? 'Tasks'
-                                                                  : 'Tasks (${tasks.where((t) => !t.isCompleted).length})',
-                                                              style: TextStyle(
-                                                                fontSize: 12,
-                                                                fontWeight:
-                                                                    _mobileTabIndex ==
-                                                                            1
-                                                                        ? FontWeight
-                                                                            .w600
-                                                                        : FontWeight
-                                                                            .w400,
-                                                                color:
-                                                                    _mobileTabIndex ==
-                                                                            1
-                                                                        ? Colors
-                                                                            .white
-                                                                        : Colors
-                                                                            .white70,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
+                                    ? LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final availableHeight =
+                                              constraints.maxHeight;
+                                          final centerOffset = math.max(
+                                            0.0,
+                                            (availableHeight - 520) / 2,
+                                          );
+                                          final topPadding = lerpDouble(
+                                            0,
+                                            centerOffset,
+                                            sessionProgress,
+                                          )!;
+
+                                          return SingleChildScrollView(
+                                            child: Padding(
+                                              padding: EdgeInsets.only(
+                                                top: topPadding,
                                               ),
-                                              const SizedBox(height: 16),
-                                              _mobileTabIndex == 0
-                                                  ? _SettingsPanel(
-                                                      mode: mode,
-                                                      onModeChanged: setMode,
-                                                      minutes: minutes,
-                                                      onSelect: select,
-                                                      onCustom: customDuration,
-                                                      controls: const SizedBox
-                                                          .shrink(),
-                                                      running: running,
-                                                      workMinutes: workMinutes,
-                                                      breakMinutes: breakMinutes,
-                                                      longBreakMinutes:
-                                                          longBreakMinutes,
-                                                      totalRounds: totalRounds,
-                                                      onPomodoroUpdate:
-                                                          updatePomodoro,
-                                                      currentAtmosphere:
-                                                          currentAtmosphere,
-                                                      onAtmosphereChanged: (v) =>
-                                                          setState(
-                                                        () =>
-                                                            currentAtmosphere = v,
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.stretch,
+                                                children: [
+                                                  dial,
+                                                  const SizedBox(height: 18),
+                                                  Center(child: controls),
+                                                  const SizedBox(height: 20),
+                                                  if (isMobile) ...[
+                                                    // Mobile Tab Selector (Focus Setup / Active Focus 🔒 | Tasks)
+                                                    Center(
+                                                      child: Container(
+                                                        height: 38,
+                                                        constraints:
+                                                            const BoxConstraints(
+                                                          maxWidth: 320,
+                                                        ),
+                                                        decoration:
+                                                            BoxDecoration(
+                                                          borderRadius:
+                                                              BorderRadius
+                                                                  .circular(20),
+                                                          color: Colors.white
+                                                              .withValues(
+                                                            alpha: 0.12,
+                                                          ),
+                                                          border: Border.all(
+                                                            color: Colors.white
+                                                                .withValues(
+                                                              alpha: 0.22,
+                                                            ),
+                                                            width: 1,
+                                                          ),
+                                                        ),
+                                                        child: Row(
+                                                          children: [
+                                                            Expanded(
+                                                              child:
+                                                                  GestureDetector(
+                                                                onTap: () =>
+                                                                    setState(
+                                                                  () =>
+                                                                      _mobileTabIndex =
+                                                                          0,
+                                                                ),
+                                                                behavior:
+                                                                    HitTestBehavior
+                                                                        .opaque,
+                                                                child:
+                                                                    AnimatedContainer(
+                                                                  duration:
+                                                                      const Duration(
+                                                                    milliseconds:
+                                                                        200,
+                                                                  ),
+                                                                  decoration:
+                                                                      BoxDecoration(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                      18,
+                                                                    ),
+                                                                    color: _mobileTabIndex ==
+                                                                            0
+                                                                        ? Colors.white.withValues(
+                                                                            alpha:
+                                                                                0.25,
+                                                                          )
+                                                                        : Colors
+                                                                            .transparent,
+                                                                  ),
+                                                                  alignment:
+                                                                      Alignment
+                                                                          .center,
+                                                                  child: Text(
+                                                                    _sessionActive
+                                                                        ? 'Active Focus 🔒'
+                                                                        : 'Focus Setup',
+                                                                    style:
+                                                                        TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      fontWeight:
+                                                                          _mobileTabIndex ==
+                                                                                  0
+                                                                              ? FontWeight.w600
+                                                                              : FontWeight.w400,
+                                                                      color: _mobileTabIndex ==
+                                                                              0
+                                                                          ? Colors.white
+                                                                          : Colors.white70,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            Expanded(
+                                                              child:
+                                                                  GestureDetector(
+                                                                onTap: () =>
+                                                                    setState(
+                                                                  () =>
+                                                                      _mobileTabIndex =
+                                                                          1,
+                                                                ),
+                                                                behavior:
+                                                                    HitTestBehavior
+                                                                        .opaque,
+                                                                child:
+                                                                    AnimatedContainer(
+                                                                  duration:
+                                                                      const Duration(
+                                                                    milliseconds:
+                                                                        200,
+                                                                  ),
+                                                                  decoration:
+                                                                      BoxDecoration(
+                                                                    borderRadius:
+                                                                        BorderRadius.circular(
+                                                                      18,
+                                                                    ),
+                                                                    color: _mobileTabIndex ==
+                                                                            1
+                                                                        ? Colors.white.withValues(
+                                                                            alpha:
+                                                                                0.25,
+                                                                          )
+                                                                        : Colors
+                                                                            .transparent,
+                                                                  ),
+                                                                  alignment:
+                                                                      Alignment
+                                                                          .center,
+                                                                  child: Text(
+                                                                    tasks
+                                                                            .isEmpty
+                                                                        ? 'Tasks'
+                                                                        : 'Tasks (${tasks.where((t) => !t.isCompleted).length})',
+                                                                    style:
+                                                                        TextStyle(
+                                                                      fontSize:
+                                                                          12,
+                                                                      fontWeight:
+                                                                          _mobileTabIndex ==
+                                                                                  1
+                                                                              ? FontWeight.w600
+                                                                              : FontWeight.w400,
+                                                                      color: _mobileTabIndex ==
+                                                                              1
+                                                                          ? Colors.white
+                                                                          : Colors.white70,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
                                                       ),
-                                                      pomodoroPhase:
-                                                          pomodoroPhase,
-                                                      currentRound: currentRound,
-                                                      onSelectPhase:
-                                                          selectPomodoroPhase,
-                                                      onCustomPhaseDuration:
-                                                          customPomodoroPhaseDuration,
-                                                      isMobile: isMobile,
-                                                    )
-                                                  : SizedBox(
-                                                      height: 380,
+                                                    ),
+                                                    const SizedBox(height: 16),
+                                                    _mobileTabIndex == 0
+                                                        ? buildSettingsPanel(
+                                                            isMobilePanel: true,
+                                                          )
+                                                        : SizedBox(
+                                                            height: 380,
+                                                            child: taskPanel,
+                                                          ),
+                                                  ] else ...[
+                                                    buildSettingsPanel(
+                                                      isMobilePanel: false,
+                                                    ),
+                                                    const SizedBox(height: 16),
+                                                    SizedBox(
+                                                      height: 350,
                                                       child: taskPanel,
                                                     ),
-                                            ] else ...[
-                                              _SettingsPanel(
-                                                mode: mode,
-                                                onModeChanged: setMode,
-                                                minutes: minutes,
-                                                onSelect: select,
-                                                onCustom: customDuration,
-                                                controls: const SizedBox.shrink(),
-                                                running: running,
-                                                workMinutes: workMinutes,
-                                                breakMinutes: breakMinutes,
-                                                longBreakMinutes:
-                                                    longBreakMinutes,
-                                                totalRounds: totalRounds,
-                                                onPomodoroUpdate:
-                                                    updatePomodoro,
-                                                currentAtmosphere:
-                                                    currentAtmosphere,
-                                                onAtmosphereChanged: (v) =>
-                                                    setState(
-                                                  () => currentAtmosphere = v,
-                                                ),
-                                                pomodoroPhase: pomodoroPhase,
-                                                currentRound: currentRound,
-                                                onSelectPhase:
-                                                    selectPomodoroPhase,
-                                                onCustomPhaseDuration:
-                                                    customPomodoroPhaseDuration,
-                                                isMobile: false,
-                                              ),
-                                              const SizedBox(height: 16),
-                                              SizedBox(
-                                                height: 350,
-                                                child: taskPanel,
-                                              ),
-                                            ],
-                                            const SizedBox(height: 24),
-                                          ],
-                                        ),
-                                      )
-                                    : Row(
-                                        children: [
-                                          Expanded(flex: 3, child: dial),
-                                          const SizedBox(width: 24),
-                                          Expanded(
-                                            flex: 2,
-                                            child: SingleChildScrollView(
-                                              child: Column(
-                                                children: [
-                                                  _SettingsPanel(
-                                                    mode: mode,
-                                                    onModeChanged: setMode,
-                                                    minutes: minutes,
-                                                    onSelect: select,
-                                                    onCustom: customDuration,
-                                                    controls: controls,
-                                                    running: running,
-                                                    workMinutes: workMinutes,
-                                                    breakMinutes: breakMinutes,
-                                                    longBreakMinutes:
-                                                        longBreakMinutes,
-                                                    totalRounds: totalRounds,
-                                                    onPomodoroUpdate:
-                                                        updatePomodoro,
-                                                    currentAtmosphere:
-                                                        currentAtmosphere,
-                                                    onAtmosphereChanged: (v) =>
-                                                        setState(
-                                                      () =>
-                                                          currentAtmosphere = v,
-                                                    ),
-                                                    pomodoroPhase: pomodoroPhase,
-                                                    currentRound: currentRound,
-                                                    onSelectPhase:
-                                                        selectPomodoroPhase,
-                                                    onCustomPhaseDuration:
-                                                        customPomodoroPhaseDuration,
-                                                  ),
-                                                  const SizedBox(height: 16),
-                                                  SizedBox(
-                                                    height: 350,
-                                                    child: taskPanel,
-                                                  ),
+                                                  ],
+                                                  const SizedBox(height: 24),
                                                 ],
                                               ),
                                             ),
-                                          ),
-                                        ],
+                                          );
+                                        },
+                                      )
+                                    : LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          final availableWidth =
+                                              constraints.maxWidth;
+                                          final currentDialWidth = lerpDouble(
+                                            440,
+                                            580,
+                                            sessionProgress,
+                                          )!;
+                                          final targetSpacerWidth = math.max(
+                                            0.0,
+                                            (availableWidth - currentDialWidth) /
+                                                2,
+                                          );
+                                          final leftSpacerWidth = lerpDouble(
+                                            0,
+                                            targetSpacerWidth,
+                                            sessionProgress,
+                                          )!;
+                                          final rightSpacerWidth = lerpDouble(
+                                            0,
+                                            targetSpacerWidth,
+                                            sessionProgress,
+                                          )!;
+                                          final rightPanelWidth = lerpDouble(
+                                            360,
+                                            0,
+                                            sessionProgress,
+                                          )!.clamp(0.0, 360.0);
+                                          final gapWidth = lerpDouble(
+                                            24,
+                                            0,
+                                            sessionProgress,
+                                          )!;
+
+                                          return Row(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.center,
+                                            children: [
+                                              // 1. Left dynamic spacer
+                                              if (sessionProgress > 0.001)
+                                                SizedBox(width: leftSpacerWidth),
+
+                                              // 2. Main Dial & Controls Column
+                                              Expanded(
+                                                child: Center(
+                                                  child: SingleChildScrollView(
+                                                    child: Padding(
+                                                      padding:
+                                                          const EdgeInsets.symmetric(
+                                                        vertical: 12,
+                                                      ),
+                                                      child: Column(
+                                                        mainAxisSize:
+                                                            MainAxisSize.min,
+                                                        children: [
+                                                          dial,
+                                                          const SizedBox(
+                                                            height: 20,
+                                                          ),
+                                                          controls,
+                                                          if (sessionProgress >
+                                                              0.001) ...[
+                                                            const SizedBox(
+                                                              height: 16,
+                                                            ),
+                                                            Opacity(
+                                                              opacity:
+                                                                  sessionProgress
+                                                                      .clamp(
+                                                                0.0,
+                                                                1.0,
+                                                              ),
+                                                              child:
+                                                                  ConstrainedBox(
+                                                                constraints:
+                                                                    BoxConstraints(
+                                                                  maxWidth:
+                                                                      currentDialWidth,
+                                                                ),
+                                                                child:
+                                                                    buildSettingsPanel(
+                                                                  isMobilePanel:
+                                                                      false,
+                                                                ),
+                                                              ),
+                                                            ),
+                                                            if (tasks
+                                                                .isNotEmpty) ...[
+                                                              const SizedBox(
+                                                                height: 14,
+                                                              ),
+                                                              Opacity(
+                                                                opacity:
+                                                                    sessionProgress
+                                                                        .clamp(
+                                                                  0.0,
+                                                                  1.0,
+                                                                ),
+                                                                child:
+                                                                    ConstrainedBox(
+                                                                  constraints:
+                                                                      BoxConstraints(
+                                                                    maxWidth:
+                                                                        currentDialWidth,
+                                                                  ),
+                                                                  child: SizedBox(
+                                                                    height: 220,
+                                                                    child:
+                                                                        taskPanel,
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+
+                                              // 3. Right gap & collapsing setup + tasks panel
+                                              if (sessionProgress < 0.999) ...[
+                                                SizedBox(width: gapWidth),
+                                                SizedBox(
+                                                  width: rightPanelWidth,
+                                                  child: ClipRect(
+                                                    child: Opacity(
+                                                      opacity: (1.0 -
+                                                              sessionProgress)
+                                                          .clamp(0.0, 1.0),
+                                                      child:
+                                                          SingleChildScrollView(
+                                                        child: ConstrainedBox(
+                                                          constraints:
+                                                              const BoxConstraints(
+                                                            maxWidth: 360,
+                                                          ),
+                                                          child: Column(
+                                                            children: [
+                                                              buildSettingsPanel(
+                                                                isMobilePanel:
+                                                                    false,
+                                                              ),
+                                                              const SizedBox(
+                                                                height: 16,
+                                                              ),
+                                                              SizedBox(
+                                                                height: 350,
+                                                                child:
+                                                                    taskPanel,
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+
+                                              // 4. Right dynamic spacer
+                                              if (sessionProgress > 0.001)
+                                                SizedBox(
+                                                  width: rightSpacerWidth,
+                                                ),
+                                            ],
+                                          );
+                                        },
                                       ),
                               ),
                             ],
@@ -1256,10 +1427,11 @@ class _WeatherTimerState extends State<WeatherTimer>
                       },
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
+        ),
 
           // Completion overlay
           IgnorePointer(
@@ -1431,13 +1603,11 @@ class _ImmersiveBackdrop extends StatelessWidget {
     required this.clear,
     required this.breathe,
     required this.atmosphere,
-    required this.child,
   });
 
   final double clear;
   final double breathe;
   final AtmosphereType atmosphere;
-  final Widget child;
 
   @override
   Widget build(BuildContext context) {
@@ -1608,9 +1778,10 @@ class _ImmersiveBackdrop extends StatelessWidget {
         // Ocean-specific: animated bubble particles
         if (atmosphere == AtmosphereType.deepOceanToSurface)
           Positioned.fill(
-            child: _OceanBubbles(clear: clear, breathe: breathe),
+            child: RepaintBoundary(
+              child: _OceanBubbles(clear: clear, breathe: breathe),
+            ),
           ),
-        child,
       ],
     );
   }
@@ -1873,7 +2044,6 @@ class _TimerDial extends StatelessWidget {
     required this.clock,
     required this.clear,
     required this.running,
-    required this.breathe,
     required this.statusText,
     required this.sessionNameController,
     this.isPomodoro = false,
@@ -1883,12 +2053,13 @@ class _TimerDial extends StatelessWidget {
     this.longBreakMinutes = 15,
     this.onSelectPhase,
     this.isMobile = false,
+    this.sessionProgress = 0.0,
+    this.isSessionActive = false,
   });
 
   final String clock;
   final double clear;
   final bool running;
-  final double breathe;
   final String statusText;
   final TextEditingController sessionNameController;
   final bool isPomodoro;
@@ -1898,6 +2069,8 @@ class _TimerDial extends StatelessWidget {
   final int longBreakMinutes;
   final ValueChanged<PomodoroPhase>? onSelectPhase;
   final bool isMobile;
+  final double sessionProgress;
+  final bool isSessionActive;
 
   @override
   Widget build(BuildContext context) {
@@ -1908,11 +2081,47 @@ class _TimerDial extends StatelessWidget {
       clear,
     )!;
 
-    return Center(
+    final dialMaxWidth = isMobile
+        ? lerpDouble(500, 530, sessionProgress)!
+        : lerpDouble(440, 580, sessionProgress)!;
+    final dialMaxHeight = isMobile
+        ? double.infinity
+        : lerpDouble(330, 420, sessionProgress)!;
+
+    final hPadding = isMobile
+        ? lerpDouble(24, 30, sessionProgress)!
+        : lerpDouble(40, 56, sessionProgress)!;
+    final vPadding = isMobile
+        ? lerpDouble(28, 36, sessionProgress)!
+        : lerpDouble(24, 38, sessionProgress)!;
+
+    final baseFontSize = clock.length > 5
+        ? (isMobile ? 48.0 : 56.0)
+        : (isMobile ? 72.0 : 80.0);
+    final targetFontSize = clock.length > 5
+        ? (isMobile ? 62.0 : 74.0)
+        : (isMobile ? 90.0 : 110.0);
+    final clockFontSize =
+        lerpDouble(baseFontSize, targetFontSize, sessionProgress)!;
+
+    final baseLetterSpacing =
+        clock.length > 5 ? 2.0 : (isMobile ? 5.0 : 8.0);
+    final targetLetterSpacing =
+        clock.length > 5 ? 3.0 : (isMobile ? 7.0 : 12.0);
+    final clockLetterSpacing =
+        lerpDouble(baseLetterSpacing, targetLetterSpacing, sessionProgress)!;
+
+    final glowBlur = lerpDouble(70, 100, sessionProgress)!;
+    final glowSpread = lerpDouble(2, 6, sessionProgress)!;
+    final glowAlpha =
+        lerpDouble(0.20, 0.32, sessionProgress)!;
+
+    return RepaintBoundary(
+      child: Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: isMobile ? 500 : 440,
-          maxHeight: isMobile ? double.infinity : 330,
+          maxWidth: dialMaxWidth,
+          maxHeight: dialMaxHeight,
         ),
         child: Container(
           decoration: BoxDecoration(
@@ -1924,22 +2133,20 @@ class _TimerDial extends StatelessWidget {
                 offset: const Offset(0, 12),
               ),
               BoxShadow(
-                color: glowColor.withValues(alpha: 0.18 + breathe * 0.08),
-                blurRadius: 70,
-                spreadRadius: 2,
+                color: glowColor.withValues(alpha: glowAlpha),
+                blurRadius: glowBlur,
+                spreadRadius: glowSpread,
               ),
             ],
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(36),
             child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 600),
-                curve: Curves.easeInOut,
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Container(
                 padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 24 : 40,
-                  vertical: isMobile ? 28 : 24,
+                  horizontal: hPadding,
+                  vertical: vPadding,
                 ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(36),
@@ -1971,7 +2178,7 @@ class _TimerDial extends StatelessWidget {
                               durationMinutes: workMinutes,
                               isActive: pomodoroPhase == PomodoroPhase.work,
                               accentColor: const Color(0xfff59e0b),
-                              onTap: onSelectPhase != null
+                              onTap: onSelectPhase != null && !isSessionActive
                                   ? () => onSelectPhase!(PomodoroPhase.work)
                                   : null,
                             ),
@@ -1979,20 +2186,24 @@ class _TimerDial extends StatelessWidget {
                             _DialPhasePill(
                               label: 'Break',
                               durationMinutes: breakMinutes,
-                              isActive: pomodoroPhase == PomodoroPhase.shortBreak,
+                              isActive:
+                                  pomodoroPhase == PomodoroPhase.shortBreak,
                               accentColor: const Color(0xff10b981),
-                              onTap: onSelectPhase != null
-                                  ? () => onSelectPhase!(PomodoroPhase.shortBreak)
+                              onTap: onSelectPhase != null && !isSessionActive
+                                  ? () =>
+                                      onSelectPhase!(PomodoroPhase.shortBreak)
                                   : null,
                             ),
                             const SizedBox(width: 8),
                             _DialPhasePill(
                               label: 'Long Break',
                               durationMinutes: longBreakMinutes,
-                              isActive: pomodoroPhase == PomodoroPhase.longBreak,
+                              isActive:
+                                  pomodoroPhase == PomodoroPhase.longBreak,
                               accentColor: const Color(0xff8b5cf6),
-                              onTap: onSelectPhase != null
-                                  ? () => onSelectPhase!(PomodoroPhase.longBreak)
+                              onTap: onSelectPhase != null && !isSessionActive
+                                  ? () =>
+                                      onSelectPhase!(PomodoroPhase.longBreak)
                                   : null,
                             ),
                           ],
@@ -2006,13 +2217,9 @@ class _TimerDial extends StatelessWidget {
                       style: TextStyle(
                         fontFamily: 'SF Pro',
                         color: Colors.white,
-                        fontSize: clock.length > 5
-                            ? (isMobile ? 48 : 56)
-                            : (isMobile ? 72 : 80),
+                        fontSize: clockFontSize,
                         fontWeight: FontWeight.w300,
-                        letterSpacing: clock.length > 5
-                            ? 2
-                            : (isMobile ? 5 : 8),
+                        letterSpacing: clockLetterSpacing,
                         height: 1.0,
                         shadows: [
                           Shadow(
@@ -2069,6 +2276,7 @@ class _TimerDial extends StatelessWidget {
                           Expanded(
                             child: TextField(
                               controller: sessionNameController,
+                              enabled: !isSessionActive,
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.85),
@@ -2076,12 +2284,15 @@ class _TimerDial extends StatelessWidget {
                                 fontWeight: FontWeight.w400,
                               ),
                               decoration: InputDecoration(
-                                hintText: 'Name this session\u2026',
+                                hintText: isSessionActive
+                                    ? ''
+                                    : 'Name this session\u2026',
                                 hintStyle: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.35),
                                   fontSize: 12,
                                 ),
                                 border: InputBorder.none,
+                                disabledBorder: InputBorder.none,
                                 isDense: true,
                                 contentPadding: EdgeInsets.zero,
                               ),
@@ -2096,6 +2307,7 @@ class _TimerDial extends StatelessWidget {
             ),
           ),
         ),
+      ),
       ),
     );
   }
@@ -2180,6 +2392,9 @@ class _SettingsPanel extends StatelessWidget {
     this.onSelectPhase,
     this.onCustomPhaseDuration,
     this.isMobile = false,
+    this.isSessionActive = false,
+    this.sessionName = '',
+    this.timerDuration = const Duration(minutes: 30),
   });
 
   final TimerMode mode;
@@ -2199,6 +2414,174 @@ class _SettingsPanel extends StatelessWidget {
   final ValueChanged<PomodoroPhase>? onSelectPhase;
   final ValueChanged<PomodoroPhase>? onCustomPhaseDuration;
   final bool isMobile;
+  final bool isSessionActive;
+  final String sessionName;
+  final Duration timerDuration;
+
+  Widget _buildActiveSessionCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final (accentColor, modeIcon, modeTitle, phaseDesc) = switch (mode) {
+      TimerMode.timer => (
+          theme.colorScheme.primary,
+          Icons.bolt_rounded,
+          'FOCUS HORIZON ACTIVE',
+          'Target: ${timerDuration.inMinutes > 0 ? "${timerDuration.inMinutes}m" : "${timerDuration.inSeconds}s"}',
+        ),
+      TimerMode.pomodoro => switch (pomodoroPhase) {
+          PomodoroPhase.work => (
+              const Color(0xfff59e0b),
+              Icons.bolt_rounded,
+              'POMODORO FOCUS · ROUND $currentRound OF $totalRounds',
+              'Sprint: ${workMinutes}m',
+            ),
+          PomodoroPhase.shortBreak => (
+              const Color(0xff10b981),
+              Icons.coffee_rounded,
+              'POMODORO SHORT BREAK · ROUND $currentRound OF $totalRounds',
+              'Break: ${breakMinutes}m',
+            ),
+          PomodoroPhase.longBreak => (
+              const Color(0xff8b5cf6),
+              Icons.spa_rounded,
+              'POMODORO DEEP RESTORATION',
+              'Long Break: ${longBreakMinutes}m',
+            ),
+        },
+    };
+
+    return Column(
+      key: const ValueKey('active_locked_card'),
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accentColor.withValues(alpha: 0.20),
+                border: Border.all(
+                  color: accentColor.withValues(alpha: 0.50),
+                  width: 1.2,
+                ),
+              ),
+              child: Icon(modeIcon, size: 18, color: accentColor),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    modeTitle,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    phaseDesc,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.white.withValues(alpha: 0.70),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xfff59e0b).withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: const Color(0xfff59e0b).withValues(alpha: 0.40),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(
+                    Icons.lock_rounded,
+                    size: 11,
+                    color: Color(0xfffbbf24),
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    'LOCKED',
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                      color: Color(0xfffbbf24),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        if (sessionName.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.label_outline_rounded,
+                  size: 12,
+                  color: Colors.white.withValues(alpha: 0.6),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    '“$sessionName”',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontStyle: FontStyle.italic,
+                      color: Colors.white.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Icon(
+              Icons.info_outline_rounded,
+              size: 13,
+              color: Colors.white.withValues(alpha: 0.5),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Setup controls auto-collapsed · Tap Reset to adjust',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  color: Colors.white.withValues(alpha: 0.55),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2221,9 +2604,9 @@ class _SettingsPanel extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(32),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
           child: Container(
-            padding: EdgeInsets.all(isMobile ? 20 : 24),
+            padding: EdgeInsets.all(isSessionActive ? 18 : (isMobile ? 20 : 24)),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(32),
               border: Border.all(
@@ -2239,185 +2622,195 @@ class _SettingsPanel extends StatelessWidget {
                 ],
               ),
             ),
-            child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Mode toggle
-                  _ModeToggle(mode: mode, onChanged: onModeChanged),
-                  const SizedBox(height: 20),
-
-                  // Mode-specific content
-                  if (mode == TimerMode.timer) ...[
-                    const Text(
-                      'Set your horizon',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      children:
-                          [5, 15, 30, 45, 60]
-                              .map<Widget>(
-                                (value) => ChoiceChip(
-                                  label: Text('$value min'),
-                                  selected: value == minutes,
-                                  onSelected: (_) => onSelect(value),
-                                ),
-                              )
-                              .toList()
-                            ..add(
-                              ActionChip(
-                                label: const Text('Custom'),
-                                onPressed: onCustom,
-                              ),
-                            ),
-                    ),
-                  ] else ...[
-                    Row(
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 350),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              child: isSessionActive
+                  ? _buildActiveSessionCard(context)
+                  : Column(
+                      key: const ValueKey('full_setup_column'),
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Expanded(
-                          child: Text(
-                            'Pomodoro intervals',
+                        // Mode toggle
+                        _ModeToggle(mode: mode, onChanged: onModeChanged),
+                        const SizedBox(height: 20),
+
+                        // Mode-specific content
+                        if (mode == TimerMode.timer) ...[
+                          const Text(
+                            'Set your horizon',
                             style: TextStyle(
-                              fontSize: 13,
+                              fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              letterSpacing: 0.4,
+                              letterSpacing: 0.5,
                             ),
+                          ),
+                          const SizedBox(height: 16),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children:
+                                [5, 15, 30, 45, 60]
+                                    .map<Widget>(
+                                      (value) => ChoiceChip(
+                                        label: Text('$value min'),
+                                        selected: value == minutes,
+                                        onSelected: (_) => onSelect(value),
+                                      ),
+                                    )
+                                    .toList()
+                                  ..add(
+                                    ActionChip(
+                                      label: const Text('Custom'),
+                                      onPressed: onCustom,
+                                    ),
+                                  ),
+                          ),
+                        ] else ...[
+                          Row(
+                            children: [
+                              const Expanded(
+                                child: Text(
+                                  'Pomodoro intervals',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.4,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.1),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Text(
+                                  'Round $currentRound of $totalRounds',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.white.withValues(alpha: 0.8),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+
+                          // Option 1: Focus
+                          _PomodoroPhaseOptionCard(
+                            title: 'FOCUS',
+                            minutes: workMinutes,
+                            accentColor: const Color(0xfff59e0b),
+                            icon: Icons.bolt_rounded,
+                            isCurrent: pomodoroPhase == PomodoroPhase.work,
+                            enabled: !running,
+                            onTap: () => onSelectPhase?.call(PomodoroPhase.work),
+                            onDec: () => onPomodoroUpdate(work: workMinutes - 5),
+                            onInc: () => onPomodoroUpdate(work: workMinutes + 5),
+                            onCustomDuration: () =>
+                                onCustomPhaseDuration?.call(PomodoroPhase.work),
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Option 2: Break
+                          _PomodoroPhaseOptionCard(
+                            title: 'SHORT BREAK',
+                            minutes: breakMinutes,
+                            accentColor: const Color(0xff10b981),
+                            icon: Icons.coffee_rounded,
+                            isCurrent: pomodoroPhase == PomodoroPhase.shortBreak,
+                            enabled: !running,
+                            onTap: () =>
+                                onSelectPhase?.call(PomodoroPhase.shortBreak),
+                            onDec: () => onPomodoroUpdate(brk: breakMinutes - 1),
+                            onInc: () => onPomodoroUpdate(brk: breakMinutes + 1),
+                            onCustomDuration: () =>
+                                onCustomPhaseDuration?.call(PomodoroPhase.shortBreak),
+                          ),
+                          const SizedBox(height: 8),
+
+                          // Option 3: Long Break
+                          _PomodoroPhaseOptionCard(
+                            title: 'LONG BREAK',
+                            minutes: longBreakMinutes,
+                            accentColor: const Color(0xff8b5cf6),
+                            icon: Icons.spa_rounded,
+                            isCurrent: pomodoroPhase == PomodoroPhase.longBreak,
+                            enabled: !running,
+                            onTap: () =>
+                                onSelectPhase?.call(PomodoroPhase.longBreak),
+                            onDec: () =>
+                                onPomodoroUpdate(longBrk: longBreakMinutes - 5),
+                            onInc: () =>
+                                onPomodoroUpdate(longBrk: longBreakMinutes + 5),
+                            onCustomDuration: () =>
+                                onCustomPhaseDuration?.call(PomodoroPhase.longBreak),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // Rounds per cycle bar
+                          _PomodoroRoundsBar(
+                            totalRounds: totalRounds,
+                            currentRound: currentRound,
+                            enabled: !running,
+                            onDec: () => onPomodoroUpdate(rounds: totalRounds - 1),
+                            onInc: () => onPomodoroUpdate(rounds: totalRounds + 1),
+                          ),
+                        ],
+
+                        const SizedBox(height: 18),
+                        Text(
+                          mode == TimerMode.timer
+                              ? switch (currentAtmosphere) {
+                                  AtmosphereType.deepOceanToSurface =>
+                                    'Rise from the depths.\nYour focus becomes sunlight.',
+                                  AtmosphereType.nightToDawn =>
+                                    'The night lifts gently.\nYour focus becomes the dawn.',
+                                  _ =>
+                                    'The storm fades gradually.\nYour focus becomes daylight.',
+                                }
+                              : switch (currentAtmosphere) {
+                                  AtmosphereType.deepOceanToSurface =>
+                                    'Work in rounds, rest between.\nYou surface with each cycle.',
+                                  _ =>
+                                    'Work in rounds, rest between.\nThe sky clears with each cycle.',
+                                },
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.7,
+                            color: Colors.white.withValues(alpha: 0.5),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.08),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.1),
-                              width: 1,
-                            ),
-                          ),
-                          child: Text(
-                            'Round $currentRound of $totalRounds',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white.withValues(alpha: 0.8),
-                            ),
-                          ),
-                        ),
+                        const SizedBox(height: 20),
+                        controls,
                       ],
                     ),
-                    const SizedBox(height: 12),
-
-                    // Option 1: Focus
-                    _PomodoroPhaseOptionCard(
-                      title: 'FOCUS',
-                      minutes: workMinutes,
-                      accentColor: const Color(0xfff59e0b),
-                      icon: Icons.bolt_rounded,
-                      isCurrent: pomodoroPhase == PomodoroPhase.work,
-                      enabled: !running,
-                      onTap: () => onSelectPhase?.call(PomodoroPhase.work),
-                      onDec: () => onPomodoroUpdate(work: workMinutes - 5),
-                      onInc: () => onPomodoroUpdate(work: workMinutes + 5),
-                      onCustomDuration: () =>
-                          onCustomPhaseDuration?.call(PomodoroPhase.work),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Option 2: Break
-                    _PomodoroPhaseOptionCard(
-                      title: 'SHORT BREAK',
-                      minutes: breakMinutes,
-                      accentColor: const Color(0xff10b981),
-                      icon: Icons.coffee_rounded,
-                      isCurrent: pomodoroPhase == PomodoroPhase.shortBreak,
-                      enabled: !running,
-                      onTap: () =>
-                          onSelectPhase?.call(PomodoroPhase.shortBreak),
-                      onDec: () => onPomodoroUpdate(brk: breakMinutes - 1),
-                      onInc: () => onPomodoroUpdate(brk: breakMinutes + 1),
-                      onCustomDuration: () =>
-                          onCustomPhaseDuration?.call(PomodoroPhase.shortBreak),
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Option 3: Long Break
-                    _PomodoroPhaseOptionCard(
-                      title: 'LONG BREAK',
-                      minutes: longBreakMinutes,
-                      accentColor: const Color(0xff8b5cf6),
-                      icon: Icons.spa_rounded,
-                      isCurrent: pomodoroPhase == PomodoroPhase.longBreak,
-                      enabled: !running,
-                      onTap: () =>
-                          onSelectPhase?.call(PomodoroPhase.longBreak),
-                      onDec: () =>
-                          onPomodoroUpdate(longBrk: longBreakMinutes - 5),
-                      onInc: () =>
-                          onPomodoroUpdate(longBrk: longBreakMinutes + 5),
-                      onCustomDuration: () =>
-                          onCustomPhaseDuration?.call(PomodoroPhase.longBreak),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // Rounds per cycle bar
-                    _PomodoroRoundsBar(
-                      totalRounds: totalRounds,
-                      currentRound: currentRound,
-                      enabled: !running,
-                      onDec: () => onPomodoroUpdate(rounds: totalRounds - 1),
-                      onInc: () => onPomodoroUpdate(rounds: totalRounds + 1),
-                    ),
-                  ],
-
-                  const SizedBox(height: 18),
-                  Text(
-                    mode == TimerMode.timer
-                        ? switch (currentAtmosphere) {
-                            AtmosphereType.deepOceanToSurface =>
-                              'Rise from the depths.\nYour focus becomes sunlight.',
-                            AtmosphereType.nightToDawn =>
-                              'The night lifts gently.\nYour focus becomes the dawn.',
-                            _ =>
-                              'The storm fades gradually.\nYour focus becomes daylight.',
-                          }
-                        : switch (currentAtmosphere) {
-                            AtmosphereType.deepOceanToSurface =>
-                              'Work in rounds, rest between.\nYou surface with each cycle.',
-                            _ =>
-                              'Work in rounds, rest between.\nThe sky clears with each cycle.',
-                          },
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.7,
-                      color: Colors.white.withValues(alpha: 0.5),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  controls,
-                ],
-              ),
             ),
           ),
         ),
-      );
+      ),
+    );
 
     if (isMobile) {
       return panel;
     }
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 360),
-      child: panel,
+    return RepaintBoundary(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: isSessionActive ? 580 : 360),
+        child: panel,
+      ),
     );
   }
 }
@@ -2908,7 +3301,7 @@ class _CompletionOverlay extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(36),
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 40, sigmaY: 40),
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 48,
@@ -3065,7 +3458,7 @@ class _TaskListPanel extends StatelessWidget {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(32),
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
           child: Container(
             padding: EdgeInsets.all(isMobile ? 20 : 24),
             decoration: BoxDecoration(
@@ -3209,11 +3602,13 @@ class _TaskListPanel extends StatelessWidget {
       );
 
     if (isMobile) {
-      return panel;
+      return RepaintBoundary(child: panel);
     }
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 340),
-      child: panel,
+    return RepaintBoundary(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: panel,
+      ),
     );
   }
 }
@@ -3246,7 +3641,7 @@ class _SettingsDialog extends StatelessWidget {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(28),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
               padding: const EdgeInsets.all(28),
               decoration: BoxDecoration(
@@ -3636,7 +4031,7 @@ class _ProgressDialogState extends State<_ProgressDialog> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(28),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
               padding: const EdgeInsets.all(26),
               decoration: BoxDecoration(
@@ -4386,7 +4781,7 @@ class _CustomDurationDialogState extends State<_CustomDurationDialog> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(32),
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
+            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
               decoration: BoxDecoration(

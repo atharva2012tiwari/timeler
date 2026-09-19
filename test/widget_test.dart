@@ -155,4 +155,77 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('15:00'), findsOneWidget);
   });
+
+  testWidgets('auto-collapses setup panel on session start, stays collapsed when paused, and restores on reset', (tester) async {
+    await tester.pumpWidget(const Timeler());
+
+    // Initially setup panel is fully expanded
+    expect(find.text('Set your horizon'), findsOneWidget);
+    expect(find.text('Begin focus'), findsOneWidget);
+    expect(find.text('LOCKED'), findsNothing);
+
+    // Tap Begin focus
+    await tester.tap(find.text('Begin focus'));
+    // Pump through the 700ms animation
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // Panel is now collapsed to the locked status card
+    expect(find.text('Set your horizon'), findsNothing);
+    expect(find.text('LOCKED'), findsWidgets);
+    expect(find.text('Setup controls auto-collapsed · Tap Reset to adjust'), findsWidgets);
+    expect(find.text('Pause'), findsOneWidget);
+
+    // Tap Pause mid-session (e.g. at 29:59 or 00:01)
+    await tester.tap(find.text('Pause'));
+    await tester.pump(const Duration(milliseconds: 200));
+
+    // Even when paused, panel must stay collapsed and locked to prevent accidental resets
+    expect(find.text('Resume'), findsOneWidget);
+    expect(find.text('Set your horizon'), findsNothing);
+    expect(find.text('LOCKED'), findsWidgets);
+
+    // Tap Reset to cancel session
+    await tester.tap(find.text('Reset'));
+    // Pump through reverse animation
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // Setup controls are re-enabled and restored
+    expect(find.text('Begin focus'), findsOneWidget);
+    expect(find.text('Set your horizon'), findsOneWidget);
+    expect(find.text('LOCKED'), findsNothing);
+  });
+
+  testWidgets('mobile auto-collapses setup panel and disables session name edit during session', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const Timeler());
+
+    expect(find.text('Begin focus'), findsOneWidget);
+    expect(find.text('Set your horizon'), findsOneWidget);
+
+    // Tap Begin focus
+    await tester.tap(find.text('Begin focus'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    // In mobile, locked card is displayed under the dial and controls
+    expect(find.text('LOCKED'), findsOneWidget);
+    expect(find.text('Setup controls auto-collapsed · Tap Reset to adjust'), findsOneWidget);
+    expect(find.text('Set your horizon'), findsNothing);
+
+    // Reset cleanly
+    await tester.tap(find.text('Reset'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('Begin focus'), findsOneWidget);
+    expect(find.text('Set your horizon'), findsOneWidget);
+    expect(find.text('LOCKED'), findsNothing);
+  });
 }
+

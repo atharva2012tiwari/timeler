@@ -176,11 +176,11 @@ Download the pre-compiled universal release APK from [GitHub Releases](https://g
 
 ```bash
 # Download and install via ADB (or download directly on your phone)
-wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.1.0/timeler-1.1.0-android.apk
-adb install timeler-1.1.0-android.apk
+wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timeler-1.2.0-android.apk
+adb install timeler-1.2.0-android.apk
 ```
 
-*Or download [`timeler-1.1.0-android.apk`](https://github.com/atharva2012tiwari/timeler/releases/download/v1.1.0/timeler-1.1.0-android.apk) directly on your Android phone and tap **Install**.*
+*Or download [`timeler-1.2.0-android.apk`](https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timeler-1.2.0-android.apk) directly on your Android phone and tap **Install**.*
 
 ---
 
@@ -189,8 +189,8 @@ Download the latest pre-compiled `.deb` binary from [GitHub Releases](https://gi
 
 ```bash
 # Download and install
-wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.1.0/timeler_1.1.0_amd64.deb
-sudo dpkg -i timeler_1.1.0_amd64.deb
+wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timeler_1.2.0_amd64.deb
+sudo dpkg -i timeler_1.2.0_amd64.deb
 
 # If missing any dependencies, resolve with:
 sudo apt-get install -f
@@ -202,7 +202,7 @@ sudo apt-get install -f
 Download the native RPM package from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
 
 ```bash
-sudo dnf install https://github.com/atharva2012tiwari/timeler/releases/download/v1.1.0/timeler-1.1.0-1.x86_64.rpm
+sudo dnf install https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timeler-1.2.0-1.x86_64.rpm
 ```
 
 ---
@@ -212,10 +212,10 @@ Extract the portable standalone bundle anywhere:
 
 ```bash
 # Download tarball
-wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.1.0/timeler-1.1.0-linux-x64.tar.gz
+wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timeler-1.2.0-linux-x64.tar.gz
 
 # Extract and run
-tar -xzf timeler-1.1.0-linux-x64.tar.gz
+tar -xzf timeler-1.2.0-linux-x64.tar.gz
 ./timeler/timeler
 ```
 

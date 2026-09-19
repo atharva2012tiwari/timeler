@@ -1,6 +1,6 @@
 name: timeler
 base: core24
-version: '1.1.0'
+version: '1.2.0'
 summary: Atmospheric focus & Pomodoro timer
 description: |
   Timeler is an atmospheric focus and Pomodoro productivity timer with
