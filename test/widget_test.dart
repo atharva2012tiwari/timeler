@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:timeler/main.dart';
 
@@ -125,5 +126,33 @@ void main() {
     await tester.tap(find.text('Reset'));
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('Begin focus'), findsOneWidget);
+  });
+
+  testWidgets('renders properly on mobile phone screen dimensions (portrait viewport)', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(const Timeler());
+    expect(find.text('TIMELER'), findsOneWidget);
+    expect(find.text('30:00'), findsOneWidget);
+    expect(find.text('Begin focus'), findsOneWidget);
+
+    // Verify presets are reachable in scrollable column
+    final customChip = find.text('Custom');
+    await tester.ensureVisible(customChip);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(customChip, findsOneWidget);
+
+    final fifteenMinChip = find.text('15 min');
+    await tester.ensureVisible(fifteenMinChip);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(fifteenMinChip, findsOneWidget);
+
+    // Verify interaction on mobile
+    await tester.tap(fifteenMinChip);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('15:00'), findsOneWidget);
   });
 }

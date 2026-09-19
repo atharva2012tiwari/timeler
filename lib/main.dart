@@ -5,19 +5,29 @@ import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 enum AtmosphereType { stormToSky, nightToDawn, deepOceanToSurface }
 
 void main() => runApp(const Timeler());
 
 // ---------------------------------------------------------------------------
-// Sound helper — uses Linux freedesktop sounds
+// Sound helper — uses Linux freedesktop sounds or Android native MethodChannel
 // ---------------------------------------------------------------------------
 
 class SoundPlayer {
   static Process? _activeProcess;
+  static const MethodChannel _androidAudio =
+      MethodChannel('io.github.atharva2012tiwari.timeler/audio');
 
   static Future<void> playCompletion() async {
+    if (Platform.isAndroid) {
+      try {
+        await _androidAudio.invokeMethod('playCompletion');
+        return;
+      } catch (_) {}
+    }
     _activeProcess?.kill();
     for (final cmd in [
       [
@@ -40,11 +50,22 @@ class SoundPlayer {
   }
 
   static void stop() {
+    if (Platform.isAndroid) {
+      try {
+        _androidAudio.invokeMethod('stop');
+      } catch (_) {}
+    }
     _activeProcess?.kill();
     _activeProcess = null;
   }
 
   static Future<void> playPhaseEnd() async {
+    if (Platform.isAndroid) {
+      try {
+        await _androidAudio.invokeMethod('playBell');
+        return;
+      } catch (_) {}
+    }
     for (final cmd in [
       [
         'ffplay',
@@ -145,12 +166,21 @@ class StatsService {
   Future<File> _resolveFile() async {
     String? basePath = Platform.environment['SNAP_USER_DATA'];
     if (basePath == null || basePath.isEmpty) {
-      final xdg = Platform.environment['XDG_DATA_HOME'];
-      if (xdg != null && xdg.isNotEmpty) {
-        basePath = '$xdg/timeler';
+      if (Platform.isLinux) {
+        final xdg = Platform.environment['XDG_DATA_HOME'];
+        if (xdg != null && xdg.isNotEmpty) {
+          basePath = '$xdg/timeler';
+        } else {
+          final home = Platform.environment['HOME'] ?? '.';
+          basePath = '$home/.local/share/timeler';
+        }
       } else {
-        final home = Platform.environment['HOME'] ?? '.';
-        basePath = '$home/.local/share/timeler';
+        try {
+          final dir = await getApplicationDocumentsDirectory();
+          basePath = dir.path;
+        } catch (_) {
+          basePath = '.';
+        }
       }
     }
     final dir = Directory(basePath);
@@ -882,15 +912,14 @@ class _WeatherTimerState extends State<WeatherTimer>
                   clear: clear,
                   breathe: _breathe.value,
                   child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 40,
-                        vertical: 24,
-                      ),
-                      child: LayoutBuilder(
-                        builder: (_, box) {
-                          final compact = box.maxWidth < 950;
-                          final dial = _TimerDial(
+                    child: LayoutBuilder(
+                      builder: (_, box) {
+                        final isMobile = box.maxWidth < 600;
+                        final compact = box.maxWidth < 950;
+                        final horizontalPadding =
+                            isMobile ? 16.0 : (compact ? 24.0 : 40.0);
+                        final verticalPadding = isMobile ? 12.0 : 24.0;
+                        final dial = _TimerDial(
                             clock: clock,
                             clear: clear,
                             running: running,
@@ -919,7 +948,12 @@ class _WeatherTimerState extends State<WeatherTimer>
                             onAdd: addTask,
                             controller: _taskController,
                           );
-                          return Column(
+                          return Padding(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: horizontalPadding,
+                              vertical: verticalPadding,
+                            ),
+                            child: Column(
                             children: [
                               // Quote
                               _QuoteBanner(atmosphere: currentAtmosphere),
@@ -1018,9 +1052,9 @@ class _WeatherTimerState extends State<WeatherTimer>
                                       ),
                               ),
                             ],
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -2489,15 +2523,17 @@ class _Controls extends StatelessWidget {
             ? Icons.arrow_forward_rounded
             : Icons.play_arrow_rounded);
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 16,
+      runSpacing: 10,
       children: [
         TextButton.icon(
           onPressed: onReset,
           icon: const Icon(Icons.replay_rounded, size: 18),
           label: const Text('Reset'),
         ),
-        const SizedBox(width: 20),
         FilledButton.icon(
           onPressed: onToggle,
           icon: Icon(icon, size: 20),
