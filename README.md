@@ -174,11 +174,13 @@ sudo snap install timeler
 ### 2. Android (`.apk`)
 Download the pre-compiled universal release APK from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
 
-- **Direct Install**: Download [`app-release.apk`](https://github.com/atharva2012tiwari/timeler/releases/latest) directly onto your Android phone and tap **Install**.
-- **Via ADB**:
-  ```bash
-  adb install app-release.apk
-  ```
+```bash
+# Download and install via ADB (or download directly on your phone)
+wget https://github.com/atharva2012tiwari/timeler/releases/download/v1.1.0/timeler-1.1.0-android.apk
+adb install timeler-1.1.0-android.apk
+```
+
+*Or download [`timeler-1.1.0-android.apk`](https://github.com/atharva2012tiwari/timeler/releases/download/v1.1.0/timeler-1.1.0-android.apk) directly on your Android phone and tap **Install**.*
 
 ---
 
@@ -259,7 +261,7 @@ flutter build apk --release
 ```
 
 The compiled APK will be located at:
-`build/app/outputs/flutter-apk/app-release.apk`
+`build/app/outputs/flutter-apk/timeler-1.1.0-android.apk` (or `app-release.apk`)
 
 ---
 
