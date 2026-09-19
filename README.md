@@ -4,7 +4,7 @@
 
   # ⏱️ Timeler
 
-  **An immersive atmospheric focus & Pomodoro productivity suite for Linux.**  
+  **An immersive atmospheric focus & Pomodoro productivity suite for Linux & Android.**  
   *Transform your workspace into living weather horizons that evolve as you work.*
 
   <br>
@@ -15,7 +15,8 @@
 
   [![Version](https://img.shields.io/github/v/release/atharva2012tiwari/timeler?style=for-the-badge&color=2563EB&label=Release)](https://github.com/atharva2012tiwari/timeler/releases/latest)
   [![License: MIT](https://img.shields.io/badge/License-MIT-10B981?style=for-the-badge)](LICENSE)
-  [![Platform](https://img.shields.io/badge/Platform-Linux-F59E0B?style=for-the-badge&logo=linux&logoColor=white)](https://snapcraft.io/timeler)
+  [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://snapcraft.io/timeler)
+  [![Platform: Android](https://img.shields.io/badge/Platform-Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/atharva2012tiwari/timeler/releases/latest)
   [![Built with Flutter](https://img.shields.io/badge/Built_with-Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
   [![Privacy](https://img.shields.io/badge/Privacy-100%25_Offline-8B5CF6?style=for-the-badge)](README.md)
   [![GitHub Stars](https://img.shields.io/github/stars/atharva2012tiwari/timeler?style=for-the-badge&color=EAB308)](https://github.com/atharva2012tiwari/timeler/stargazers)
@@ -45,9 +46,10 @@
 - [✅ Inline Focus Checklist](#-inline-focus-checklist)
 - [🚀 Installation](#-installation)
   - [Canonical Snap Store (Universal Linux)](#1-snap-store-recommended-universal-linux)
-  - [Ubuntu / Debian (`.deb`)](#2-ubuntu--debian-mint-pop_os-deb)
-  - [Fedora / RHEL / openSUSE (`.rpm`)](#3-fedora--rhel--opensuse-rpm)
-  - [Arch Linux / Generic Binary](#4-arch-linux--universal-tarball)
+  - [Android (`.apk`)](#2-android-apk)
+  - [Ubuntu / Debian (`.deb`)](#3-ubuntu--debian-mint-pop_os-deb)
+  - [Fedora / RHEL / openSUSE (`.rpm`)](#4-fedora--rhel--opensuse-rpm)
+  - [Arch Linux / Generic Binary](#5-arch-linux--universal-tarball)
 - [🛠️ Building from Source](#️-building-from-source)
 - [🤝 Contributing & Community](#-contributing--community)
 - [📄 License](#-license)
@@ -59,7 +61,7 @@
 Most timers are cold, sterile countdown clocks. **Timeler is built around emotional flow states.**
 
 Grounding your deep work in dynamic natural transitions, Timeler rewards continuous focus by visually dissipating tension:
-- **Zero Distractions**: Clean, glassmorphic acrylic aesthetics designed specifically for modern Linux desktops.
+- **Zero Distractions**: Clean, glassmorphic acrylic aesthetics designed specifically for modern Linux desktops and Android devices.
 - **Organic Transitions**: Watch storm clouds fade into sunshine, or abyssal ocean depths rise to turquoise coral shallows as you reach the finish line.
 - **Physics Particle Engines**: Real-time canvas particle systems for falling rain and shimmering bioluminescent bubbles.
 - **100% Offline & Private**: No sign-ups, no tracking telemetry, no cloud subscriptions. All session history is kept locally on your machine.
@@ -156,7 +158,7 @@ Keep your top priorities in sight without opening another heavy task manager:
 
 ## 🚀 Installation
 
-Timeler is packaged for all major Linux distributions.
+Timeler is packaged for Linux distributions and Android.
 
 ### 1. Snap Store (Recommended · Universal Linux)
 Available directly on Canonical's Snap Store for Ubuntu, Debian, Fedora, Arch, Manjaro, openSUSE, and Pop!_OS:
@@ -169,7 +171,18 @@ sudo snap install timeler
 
 ---
 
-### 2. Ubuntu / Debian / Mint / Pop!_OS (`.deb`)
+### 2. Android (`.apk`)
+Download the pre-compiled universal release APK from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
+
+- **Direct Install**: Download [`app-release.apk`](https://github.com/atharva2012tiwari/timeler/releases/latest) directly onto your Android phone and tap **Install**.
+- **Via ADB**:
+  ```bash
+  adb install app-release.apk
+  ```
+
+---
+
+### 3. Ubuntu / Debian / Mint / Pop!_OS (`.deb`)
 Download the latest pre-compiled `.deb` binary from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
 
 ```bash
@@ -183,7 +196,7 @@ sudo apt-get install -f
 
 ---
 
-### 3. Fedora / RHEL / openSUSE (`.rpm`)
+### 4. Fedora / RHEL / openSUSE (`.rpm`)
 Download the native RPM package from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
 
 ```bash
@@ -192,7 +205,7 @@ sudo dnf install https://github.com/atharva2012tiwari/timeler/releases/download/
 
 ---
 
-### 4. Arch Linux / Universal Tarball
+### 5. Arch Linux / Universal Tarball
 Extract the portable standalone bundle anywhere:
 
 ```bash
@@ -210,7 +223,7 @@ tar -xzf timeler-1.1.0-linux-x64.tar.gz
 
 ### Prerequisites
 - **Flutter SDK** (3.24.x or higher)
-- **Linux Toolchain**:
+- **Linux Toolchain** (for desktop build):
   ```bash
   # Ubuntu / Debian
   sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev libpulse-dev
@@ -218,8 +231,9 @@ tar -xzf timeler-1.1.0-linux-x64.tar.gz
   # Fedora
   sudo dnf install clang cmake ninja-build pkgconfig gtk3-devel pulseaudio-libs-devel
   ```
+- **Android SDK & JDK 17+** (for Android build)
 
-### Build & Run
+### Build for Linux Desktop
 ```bash
 # 1. Clone the repository
 git clone https://github.com/atharva2012tiwari/timeler.git
@@ -235,8 +249,17 @@ flutter run -d linux
 flutter build linux --release
 ```
 
-The compiled binary will be located at:
+The compiled Linux binary will be located at:
 `build/linux/x64/release/bundle/timeler`
+
+### Build for Android
+```bash
+# Build universal release APK
+flutter build apk --release
+```
+
+The compiled APK will be located at:
+`build/app/outputs/flutter-apk/app-release.apk`
 
 ---
 
@@ -250,7 +273,7 @@ Contributions, issue reports, and design suggestions are warmly welcomed!
 4. **Push** to the branch (`git push origin feature/amazing-feature`)
 5. **Open** a Pull Request
 
-⭐ **Enjoying Timeler?** Give the repository a star on GitHub — it helps more Linux users discover atmospheric focus!
+⭐ **Enjoying Timeler?** Give the repository a star on GitHub — it helps more people discover atmospheric focus!
 
 ---
 
