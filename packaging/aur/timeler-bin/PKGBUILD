@@ -1,0 +1,60 @@
+# Maintainer: Atharva Tiwari <atharva2012tiwari@gmail.com>
+
+pkgname=timeler-bin
+pkgver=1.2.0
+pkgrel=1
+pkgdesc="Atmospheric focus and pomodoro timer with live weather transitions"
+arch=('x86_64')
+url="https://github.com/atharva2012tiwari/timeler"
+license=('MIT')
+depends=(
+  'gtk3'
+  'libepoxy'
+  'jsoncpp'
+  'hicolor-icon-theme'
+)
+optdepends=(
+  'zenity: For native file picker dialogs'
+)
+provides=('timeler')
+conflicts=('timeler')
+source=(
+  "${pkgname}-${pkgver}.tar.gz::https://github.com/atharva2012tiwari/timeler/releases/download/v${pkgver}/timeler-${pkgver}-linux-x64.tar.gz"
+  "com.timeler.Timeler.desktop::https://raw.githubusercontent.com/atharva2012tiwari/timeler/v${pkgver}/packaging/linux/com.timeler.Timeler.desktop"
+  "com.timeler.Timeler.svg::https://raw.githubusercontent.com/atharva2012tiwari/timeler/v${pkgver}/packaging/linux/com.timeler.Timeler.svg"
+  "com.timeler.Timeler.png::https://raw.githubusercontent.com/atharva2012tiwari/timeler/v${pkgver}/packaging/linux/com.timeler.Timeler.png"
+  "com.timeler.Timeler.metainfo.xml::https://raw.githubusercontent.com/atharva2012tiwari/timeler/v${pkgver}/packaging/linux/com.timeler.Timeler.metainfo.xml"
+  "LICENSE::https://raw.githubusercontent.com/atharva2012tiwari/timeler/v${pkgver}/LICENSE"
+)
+sha256sums=(
+  '9c829ca14849286afa6678befbaa8a98c5e4be61115051930b7d9e44ac441d24'
+  'd909dd98498934f8e004516c47076b61c8fd784f2b953746b25bdd610e24e925'
+  '4ece2ac2e71a08cae24e06487dfaf2cee0d57be979e87e26dbc93235a6833258'
+  '2fb4ef39e9d560c7844e2f1784d831b38a7d225acee6fd329abbef3db7b11a04'
+  '8dad9450113b67929ae88c061ee9d617737c2e2a549eea5715b49c37472cd92f'
+  '1c482fe25f66bea2f463f54a9fba6f3b3a230e48680d1fcad506654fa54e841d'
+)
+
+package() {
+  # Install bundled binary and assets to /usr/lib/timeler
+  install -dm755 "${pkgdir}/usr/lib/timeler"
+  cp -r "${srcdir}/timeler/"* "${pkgdir}/usr/lib/timeler/"
+
+  # Symlink executable into /usr/bin
+  install -dm755 "${pkgdir}/usr/bin"
+  ln -sf /usr/lib/timeler/timeler "${pkgdir}/usr/bin/timeler"
+
+  # Desktop launcher
+  install -Dm644 "${srcdir}/com.timeler.Timeler.desktop" "${pkgdir}/usr/share/applications/com.timeler.Timeler.desktop"
+
+  # AppStream Metainfo
+  install -Dm644 "${srcdir}/com.timeler.Timeler.metainfo.xml" "${pkgdir}/usr/share/metainfo/com.timeler.Timeler.metainfo.xml"
+
+  # Application Icons
+  install -Dm644 "${srcdir}/com.timeler.Timeler.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/com.timeler.Timeler.svg"
+  install -Dm644 "${srcdir}/com.timeler.Timeler.png" "${pkgdir}/usr/share/icons/hicolor/512x512/apps/com.timeler.Timeler.png"
+  install -Dm644 "${srcdir}/com.timeler.Timeler.png" "${pkgdir}/usr/share/pixmaps/com.timeler.Timeler.png"
+
+  # License
+  install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

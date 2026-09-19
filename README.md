@@ -49,7 +49,8 @@
   - [Android (`.apk`)](#2-android-apk)
   - [Ubuntu / Debian (`.deb`)](#3-ubuntu--debian-mint-pop_os-deb)
   - [Fedora / RHEL / openSUSE (`.rpm`)](#4-fedora--rhel--opensuse-rpm)
-  - [Arch Linux / Generic Binary](#5-arch-linux--universal-tarball)
+  - [Arch Linux / Manjaro (AUR)](#5-arch-linux--manjaro-aur)
+  - [Portable Universal Linux Tarball](#6-portable-universal-linux-tarball)
 - [🛠️ Building from Source](#️-building-from-source)
 - [🤝 Contributing & Community](#-contributing--community)
 - [📄 License](#-license)
@@ -199,7 +200,7 @@ sudo apt-get install -f
 ---
 
 ### 4. Fedora / RHEL / openSUSE (`.rpm`)
-Download the native RPM package from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
+Download and install the native RPM package from [GitHub Releases](https://github.com/atharva2012tiwari/timeler/releases/latest):
 
 ```bash
 sudo dnf install https://github.com/atharva2012tiwari/timeler/releases/download/v1.2.0/timeler-1.2.0-1.x86_64.rpm
@@ -207,8 +208,30 @@ sudo dnf install https://github.com/atharva2012tiwari/timeler/releases/download/
 
 ---
 
-### 5. Arch Linux / Universal Tarball
-Extract the portable standalone bundle anywhere:
+### 5. Arch Linux / Manjaro (AUR)
+Install via your favorite AUR helper:
+
+```bash
+# Using yay
+yay -S timeler-bin
+
+# Using paru
+paru -S timeler-bin
+```
+
+Or clone and build manually with `makepkg`:
+```bash
+git clone https://aur.archlinux.org/timeler-bin.git
+cd timeler-bin
+makepkg -si
+```
+
+*(AUR package sources and metadata are maintained in [`packaging/aur/timeler-bin`](packaging/aur/timeler-bin).)*
+
+---
+
+### 6. Portable Universal Linux Tarball
+Extract and run the standalone Linux bundle anywhere without installation:
 
 ```bash
 # Download tarball
