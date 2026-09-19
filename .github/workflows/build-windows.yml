@@ -1,0 +1,74 @@
+name: Build Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to upload asset to'
+        required: false
+        default: 'v1.2.0'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build & Package Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Windows Desktop
+        run: |
+          flutter --version
+          flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows Release
+        run: flutter build windows --release
+
+      - name: Package Windows Bundle
+        shell: pwsh
+        run: |
+          $releaseDir = Get-ChildItem -Path "build\windows" -Recurse -Directory -Filter "Release" | Select-Object -First 1
+          if (-not $releaseDir) {
+            Write-Error "Release directory not found!"
+            exit 1
+          }
+          Write-Host "Found release directory: $($releaseDir.FullName)"
+          New-Item -ItemType Directory -Force -Path "dist"
+          $zipPath = "dist\timeler-1.2.0-windows-x64.zip"
+          Compress-Archive -Path "$($releaseDir.FullName)\*" -DestinationPath $zipPath -Force
+          Write-Host "Windows package created at $zipPath"
+          Get-Item $zipPath | Select-Object Name, Length
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: timeler-1.2.0-windows-x64
+          path: dist\timeler-1.2.0-windows-x64.zip
+
+      - name: Upload to GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $targetTag = "${{ github.event.inputs.tag_name }}"
+          if (-not $targetTag) {
+            $targetTag = if ($env:GITHUB_REF_NAME -match '^v') { $env:GITHUB_REF_NAME } else { 'v1.2.0' }
+          }
+          Write-Host "Uploading to release tag: $targetTag"
+          gh release upload $targetTag dist\timeler-1.2.0-windows-x64.zip --clobber
